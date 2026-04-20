@@ -28,8 +28,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 class RLlibPortfolioEnv(gym.Env):
     def __init__(self, env_config):
         super().__init__()
-        
-        self.df = env_config["df"]
+        self.df = env_config["df"].copy()
         self.tickers = env_config["all_tickers"]
         self.commission = env_config.get("commission", 0.0005)
         self.initial_balance = env_config.get("initial_balance", 100000.0)
@@ -40,44 +39,30 @@ class RLlibPortfolioEnv(gym.Env):
         prob_cols = sorted([c for c in self.df.columns if 'prob_' in c])
         self.num_features = len(prob_cols)
         
+        worker_idx = env_config.worker_index if hasattr(env_config, "worker_index") else 0
+        if worker_idx == 1:
+            print(f"Формирование 3D тензоров рынка...")
+            
+        # БРОНЯ №1: Жесткая очистка сырых данных. Убиваем нули, минусы и маркеры ошибок
+        self.df['close'] = self.df['close'].apply(lambda x: np.nan if x <= 0 else x)
+        self.df = self.df.replace([-9999.0, np.inf, -np.inf], np.nan)
+            
         self.obs_tensor = np.zeros((len(self.dates), self.num_assets, self.num_features), dtype=np.float32)
         for i, date in enumerate(self.dates):
             day_data = self.df[self.df['datetime'] == date].set_index('ticker')
             for j, ticker in enumerate(self.tickers):
                 if ticker in day_data.index:
-                    self.obs_tensor[i, j, :] = day_data.loc[ticker, prob_cols].values
+                    vals = day_data.loc[ticker, prob_cols].fillna(0.0).values
+                    self.obs_tensor[i, j, :] = vals
                 elif i > 0:
                     self.obs_tensor[i, j, :] = self.obs_tensor[i-1, j, :]
-
-        # 2. Безопасное формирование price_matrix через Pandas (защита от скачков, нулей и делистинга)
+                        
+        # БРОНЯ №2: Идеально чистая матрица цен без разрывов
         pivot_close = self.df.pivot(index='datetime', columns='ticker', values='close')
-        
-        # ГАРАНТИРУЕМ, что все 50 тикеров есть в таблице. Недостающие станут NaN
         pivot_close = pivot_close.reindex(columns=self.tickers)
-        
-        # ffill заполняет пропуски вперед, bfill - назад 
-        pivot_close = pivot_close.ffill().bfill() 
-        
-        # Если актив вообще не торговался в этот период (все значения NaN), ставим цену 1.0
-        # Это "заморозит" актив, его доходность будет строго 0%
-        pivot_close = pivot_close.fillna(1.0)
-        
-        # Убедимся, что нет нулей, чтобы не было деления на ноль
-        pivot_close = pivot_close.replace(0, 0.0001) 
-        
+        pivot_close = pivot_close.ffill().bfill().fillna(1.0)
         self.price_matrix = pivot_close[self.tickers].values.astype(np.float32)
         
-        for i, date in enumerate(self.dates):
-            day_data = self.df[self.df['datetime'] == date].set_index('ticker')
-            for j, ticker in enumerate(self.tickers):
-                if ticker in day_data.index:
-                    self.obs_tensor[i, j, :] = day_data.loc[ticker, prob_cols].values
-                    self.price_matrix[i, j] = day_data.loc[ticker, 'close']
-                else:
-                    if i > 0:
-                        self.obs_tensor[i, j, :] = self.obs_tensor[i-1, j, :]
-                        self.price_matrix[i, j] = self.price_matrix[i-1, j]
-                        
         self.action_space = spaces.Box(low=-10, high=10, shape=(self.num_assets + 1,), dtype=np.float32)
         obs_shape = (self.num_assets * self.num_features) + (self.num_assets + 1)
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(obs_shape,), dtype=np.float32)
@@ -92,9 +77,14 @@ class RLlibPortfolioEnv(gym.Env):
 
     def _get_obs(self):
         market_state = self.obs_tensor[self.current_step].flatten()
-        return np.concatenate([market_state, self.weights]).astype(np.float32)
+        obs = np.concatenate([market_state, self.weights]).astype(np.float32)
+        # БРОНЯ №3: Запрещаем NaN в наблюдениях
+        return np.nan_to_num(obs, nan=0.0)
 
     def step(self, action):
+        if np.isnan(action).any():
+            action = np.zeros_like(action)
+            
         exp_a = np.exp(action - np.max(action)) 
         target_weights = exp_a / exp_a.sum()
         
@@ -108,12 +98,18 @@ class RLlibPortfolioEnv(gym.Env):
             return self._get_obs(), 0.0, done, False, {}
 
         price_change = self.price_matrix[self.current_step] / self.price_matrix[self.current_step - 1]
-        portfolio_return = self.weights[0] + np.sum(self.weights[1:] * price_change) - 1.0
         
+        # БРОНЯ №4: Режем аномалии. Акция не может упасть больше чем на 99% за день
+        price_change = np.clip(price_change, 0.01, 10.0)
+        
+        portfolio_return = self.weights[0] + np.sum(self.weights[1:] * price_change) - 1.0
         net_return = portfolio_return - transaction_cost
-        self.balance = max(0.0, self.balance * (1 + net_return))
+        
+        if not np.isnan(net_return):
+            self.balance = max(0.0, self.balance * (1 + net_return))
         
         reward = net_return if net_return > 0 else net_return * 2.0
+        if np.isnan(reward): reward = -1.0
 
         return self._get_obs(), reward, done, False, {}
 
