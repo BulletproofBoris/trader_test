@@ -41,7 +41,31 @@ class RLlibPortfolioEnv(gym.Env):
         self.num_features = len(prob_cols)
         
         self.obs_tensor = np.zeros((len(self.dates), self.num_assets, self.num_features), dtype=np.float32)
-        self.price_matrix = np.ones((len(self.dates), self.num_assets), dtype=np.float32)
+        for i, date in enumerate(self.dates):
+            day_data = self.df[self.df['datetime'] == date].set_index('ticker')
+            for j, ticker in enumerate(self.tickers):
+                if ticker in day_data.index:
+                    self.obs_tensor[i, j, :] = day_data.loc[ticker, prob_cols].values
+                elif i > 0:
+                    self.obs_tensor[i, j, :] = self.obs_tensor[i-1, j, :]
+
+        # 2. Безопасное формирование price_matrix через Pandas (защита от скачков, нулей и делистинга)
+        pivot_close = self.df.pivot(index='datetime', columns='ticker', values='close')
+        
+        # ГАРАНТИРУЕМ, что все 50 тикеров есть в таблице. Недостающие станут NaN
+        pivot_close = pivot_close.reindex(columns=self.tickers)
+        
+        # ffill заполняет пропуски вперед, bfill - назад 
+        pivot_close = pivot_close.ffill().bfill() 
+        
+        # Если актив вообще не торговался в этот период (все значения NaN), ставим цену 1.0
+        # Это "заморозит" актив, его доходность будет строго 0%
+        pivot_close = pivot_close.fillna(1.0)
+        
+        # Убедимся, что нет нулей, чтобы не было деления на ноль
+        pivot_close = pivot_close.replace(0, 0.0001) 
+        
+        self.price_matrix = pivot_close[self.tickers].values.astype(np.float32)
         
         for i, date in enumerate(self.dates):
             day_data = self.df[self.df['datetime'] == date].set_index('ticker')
@@ -87,7 +111,7 @@ class RLlibPortfolioEnv(gym.Env):
         portfolio_return = self.weights[0] + np.sum(self.weights[1:] * price_change) - 1.0
         
         net_return = portfolio_return - transaction_cost
-        self.balance *= (1 + net_return)
+        self.balance = max(0.0, self.balance * (1 + net_return))
         
         reward = net_return if net_return > 0 else net_return * 2.0
 
