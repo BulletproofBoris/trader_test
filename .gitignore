@@ -1,0 +1,45 @@
+# --- Кэш и скомпилированные файлы Python ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# --- Папки виртуальных окружений ---
+.conda/
+venv/
+env/
+.venv-tf/
+
+# --- Файлы IDE и редакторов кода ---
+.vscode/
+.idea/
+
+# --- Критически важные секретные данные ---
+# Никогда не добавляйте ваш API-токен в Git!
+.env
+
+# --- Сгенерированные файлы проекта ---
+# Все исторические данные
+data/
+experiments/
+3_labeled/
+4_ml_dataset/
+5_tfrecords/
+
+# Все результаты, логи, графики и модели
+2_results/
+*.log
+*.png
+*.pkl
+*.json
+
+# --- Временные и служебные файлы ---
+# Файлы, которые могут случайно появиться в корневой папке
+features*.csv
+optimization*.csv
+grid_search*.csv
+hypercube*.csv
+multistart*.csv
+stratified*.csv
+filelist.txt
+organizer.py
