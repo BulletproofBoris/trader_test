@@ -5,20 +5,19 @@ import numpy as np
 from pathlib import Path
 import gymnasium as gym
 from gymnasium import spaces
-from ray.tune import CLIReporter
-
 import logging
 import warnings
 
-# --- ГЛУШИМ СИСТЕМНЫЙ СПАМ И ПРЕДУПРЕЖДЕНИЯ ---
+# --- ГЛУШИМ СИСТЕМНЫЙ СПАМ И ГИГАНТСКИЕ ТАБЛИЦЫ ---
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 os.environ["RAY_DEDUP_LOGS"] = "0"
 os.environ["RAY_IGNORE_UNHANDLED_ERRORS"] = "1"
-os.environ["RAY_TUNE_DISABLE_RICH_OUTPUT"] = "1"
+os.environ["RAY_TUNE_DISABLE_RICH_OUTPUT"] = "1" # Отключает огромные рамки в консоли
 warnings.filterwarnings("ignore")
 
 import ray
 from ray import train, tune
+from ray.tune import CLIReporter
 from ray.tune.schedulers import PopulationBasedTraining
 from ray.rllib.algorithms.ppo import PPOConfig
 from ray.tune.registry import register_env
@@ -100,22 +99,27 @@ def env_creator(env_config):
 
 register_env("portfolio_env", env_creator)
 
-# --- ИСПРАВЛЕНИЕ ОШИБКИ PYTORCH TENSOR В PBT ---
+# --- ИСПРАВЛЕНИЕ ОШИБОК МУТАЦИИ PBT ---
 def custom_explore_fn(config):
-    """Принудительно конвертируем тензоры в обычные float, чтобы не крашить PyTorch Adam"""
+    """Принудительно конвертируем типы и защищаем батчи от краша"""
     if "lr" in config:
         config["lr"] = float(config["lr"])
     if "entropy_coeff" in config:
         config["entropy_coeff"] = float(config["entropy_coeff"])
     if "clip_param" in config:
         config["clip_param"] = float(config["clip_param"])
+        
+    # Защита от ошибки кратного батча
     if "train_batch_size" in config:
-        config["train_batch_size"] = int(config["train_batch_size"])
+        batch_size = int(config["train_batch_size"])
+        config["train_batch_size"] = batch_size
+        # Минибатч всегда кратен основному батчу (1/4 часть)
+        config["minibatch_size"] = batch_size // 4 
+        
     return config
 
 # --- 3. НАСТРОЙКА И ЗАПУСК ЭВОЛЮЦИИ ---
 def main(args):
-    # Выключаем вывод логов Ray в основную консоль
     ray.init(ignore_reinit_error=True, log_to_driver=False, logging_level=logging.ERROR)
     
     RL_DIR = BASE_DIR / "experiments" / "rl_trader"
@@ -138,15 +142,13 @@ def main(args):
         hyperparam_mutations={
             "lr": tune.loguniform(1e-5, 1e-3),
             "entropy_coeff": tune.uniform(0.001, 0.05),
-            "train_batch_size": [1024, 2048, 4096],
+            # Только крупные батчи для плотной загрузки видеокарты
+            "train_batch_size": [4096, 8192, 16384], 
             "clip_param": tune.uniform(0.1, 0.3),
         },
-        custom_explore_fn=custom_explore_fn # Подключаем фикс для PyTorch
+        custom_explore_fn=custom_explore_fn
     )
 
-    num_cpu = os.cpu_count() or 4
-    workers_per_agent = max(1, (num_cpu - 1) // args.population)
-    
     config = (
         PPOConfig()
         .api_stack(
@@ -155,8 +157,10 @@ def main(args):
         )
         .environment("portfolio_env", env_config={"df": train_df, "all_tickers": all_tickers, "commission": args.commission})
         .framework("torch")
-        .env_runners(num_env_runners=1, num_envs_per_env_runner=8)
-        .resources(num_gpus=0.5)
+        # 1 воркер собирает данные сразу с 8 сред (разгоняем сбор)
+        .env_runners(num_env_runners=1, num_envs_per_env_runner=8) 
+        # Выделяем ровно половину видеокарты (так как по CPU влезет только 2 агента)
+        .resources(num_gpus=0.5) 
         .training(
             model={
                 "use_lstm": True,
@@ -175,7 +179,7 @@ def main(args):
             evaluation_num_env_runners=1, 
             evaluation_config={"env_config": {"df": val_df, "all_tickers": all_tickers}}
         )
-        .debugging(log_level="ERROR") # Отключаем ворнинги RLlib
+        .debugging(log_level="ERROR") 
     )
 
     # --- НАСТРОЙКА КОМПАКТНОГО ВЫВОДА В КОНСОЛЬ ---
@@ -188,13 +192,13 @@ def main(args):
         metric_columns={
             "training_iteration": "Iter",
             "env_runners/episode_return_mean": "Profit",
-            "time_total_s": "Time (s)"
+            "time_total_s": "Time(s)"
         },
         max_progress_rows=args.population, 
         max_report_frequency=15 
     )
 
-    print(f"🚀 Старт PBT: Популяция из {args.population} агентов!")
+    print(f"🚀 Старт PBT: Популяция из {args.population} агентов. Идет обучение...")
     
     tuner = tune.Tuner(
         "PPO",
@@ -209,8 +213,8 @@ def main(args):
             name="pbt_portfolio_run",
             storage_path=str(RL_DIR / "ray_results"),
             stop={"training_iteration": args.iterations},
-            verbose=1, # 1 = базовый вывод
-            progress_reporter=reporter # <-- Подменяем спамера на наш тихий репортер
+            verbose=1, 
+            progress_reporter=reporter # Выводим нашу красивую табличку
         )
     )
     
@@ -224,7 +228,7 @@ def main(args):
         if best_result.checkpoint:
             print(f"Лучший агент сохранен в: {best_result.checkpoint.path}")
             print(f"Доходность лучшего агента: {best_result.metrics['env_runners']['episode_return_mean']:.2f}")
-        print(f"Его идеальные гиперпараметры: LR={best_result.config['lr']:.6f}, Entropy={best_result.config['entropy_coeff']:.4f}")
+        print(f"Идеальные гиперпараметры: LR={best_result.config['lr']:.6f}, Batch={best_result.config['train_batch_size']}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
