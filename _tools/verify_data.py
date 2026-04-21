@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 import json
+import tensorflow as tf
 
 def audit_dataset():
     base_path = Path("data/processed")
@@ -21,44 +22,88 @@ def audit_dataset():
         for fold in folds:
             report.write(f"\n📁 ФОЛД: {fold.name}\n{'-'*30}\n")
             
-            # Храним даты тренировки для проверки пересечений
+            # --- Отобранные признаки ---
+            features_json_path = fold / "artifacts" / "features_selected.json"
+            selected_features = []
+            if features_json_path.exists():
+                with open(features_json_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    selected_features = data.get("feature_order", [])
+                
+                report.write(f"  🎯 ОТОБРАННЫЕ ПРИЗНАКИ: {len(selected_features)} шт.\n")
+            else:
+                report.write(f"  ⚠️ ВНИМАНИЕ: features_selected.json не найден!\n")
+            
             train_dates = set()
             
             for phase in ["train", "val"]:
-                data_path = fold / "data" / phase / "ml_data.parquet"
-                if not data_path.exists(): continue
+                phase_dir = fold / "data" / phase
+                parquet_path = phase_dir / "ml_data.parquet"
+                tfrecord_path = phase_dir / "data.tfrecord"
                 
-                df = pd.read_parquet(data_path)
+                if not parquet_path.exists(): continue
                 
+                df = pd.read_parquet(parquet_path)
                 if phase == "train":
                     train_dates = set(df['datetime'].unique())
                 
-                # 1. Баланс классов
-                report.write(f"  🔹 {phase.upper()} ({len(df)} строк):\n")
+                report.write(f"  🔹 {phase.upper()} (Parquet: {len(df)} строк):\n")
+                
+                # Баланс классов в Parquet
                 counts = df['label'].value_counts(normalize=True).sort_index()
                 for lbl, pct in counts.items():
                     name = {1.0: "TP (+1)", -1.0: "SL (-1)", 0.0: "Hold (0)"}.get(lbl, "Unknown")
                     report.write(f"    {name:<10}: {pct*100:>6.2f}%\n")
                 
-                # 2. Качество данных
-                nans = df.isna().sum().sum()
-                report.write(f"    Пропуски: {nans} | Бесконечности: {np.isinf(df.select_dtypes(include=np.number).values).sum()}\n")
-                
-                # 3. Проверка на утечку
+                # --- АУДИТ TFRECORDS ---
+                if tfrecord_path.exists():
+                    report.write(f"    📦 Проверка TFRecord ({tfrecord_path.name}):\n")
+                    try:
+                        raw_dataset = tf.data.TFRecordDataset(str(tfrecord_path))
+                        example_count = 0
+                        
+                        # Описательная структура для парсинга
+                        feature_description = {
+                            'sequence': tf.io.FixedLenFeature([], tf.string),
+                            'target': tf.io.FixedLenFeature([], tf.int64),
+                        }
+
+                        for raw_record in raw_dataset.take(1):
+                            example = tf.io.parse_single_example(raw_record, feature_description)
+                            seq = tf.io.parse_tensor(example['sequence'], out_type=tf.float32)
+                            
+                            report.write(f"      ✅ Читаемость: OK\n")
+                            report.write(f"      📐 Shape тензора: {seq.shape} (Lookback x Features)\n")
+                            
+                            # Проверка на соответствие количества признаков
+                            if selected_features and seq.shape[1] != len(selected_features):
+                                report.write(f"      ❌ ОШИБКА: Кол-во признаков в тензоре ({seq.shape[1]}) != отобранным ({len(selected_features)})\n")
+
+                        # Быстрый подсчет примеров (может быть медленным на огромных файлах)
+                        example_count = sum(1 for _ in raw_dataset)
+                        report.write(f"      🔢 Всего примеров (окон): {example_count}\n")
+                        
+                    except Exception as e:
+                        report.write(f"      ❌ ОШИБКА ЧТЕНИЯ: {str(e)}\n")
+                else:
+                    report.write(f"    ⚠️ TFRecord файл отсутствует.\n")
+
+                # Статистика фичей
+                if selected_features and not df.empty:
+                    f_mean = df[selected_features].mean().mean()
+                    f_std = df[selected_features].std().mean()
+                    report.write(f"    📊 Физика фичей: Mean={f_mean:.4f}, Std={f_std:.4f}\n")
+
+                # Утечка данных
                 if phase == "val":
                     val_dates = set(df['datetime'].unique())
                     overlap = train_dates.intersection(val_dates)
                     if overlap:
-                        report.write(f"    ❌ УТЕЧКА БУДУЩЕГО: Найдено {len(overlap)} общих дней с Train!\n")
+                        report.write(f"    ❌ УТЕЧКА БУДУЩЕГО: {len(overlap)} общих дней!\n")
                     else:
-                        report.write(f"    ✅ УТЕЧКА БУДУЩЕГО: Отсутствует (Чистый тест)\n")
+                        report.write(f"    ✅ УТЕЧКА БУДУЩЕГО: Чистый тест\n")
 
-                # 4. Проверка дубликатов
-                dupes = df.duplicated(subset=['datetime', 'ticker']).sum()
-                if dupes > 0:
-                    report.write(f"    ⚠️ ВНИМАНИЕ: Найдено {dupes} дубликатов (ticker+date)!\n")
-
-    print(f"✅ Аудит завершен: {report_path.absolute()}")
+    print(f"✅ Расширенный аудит завершен: {report_path.absolute()}")
 
 if __name__ == "__main__":
     audit_dataset()
