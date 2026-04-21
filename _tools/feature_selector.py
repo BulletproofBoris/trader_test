@@ -9,8 +9,6 @@ import lightgbm as lgb
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-
 def reduce_multicollinearity(df, feature_cols, threshold=0.85):
     print(f"📉 Удаление мультиколлинеарности (порог {threshold})...")
     sample_df = df.sample(n=min(len(df), 50000), random_state=42)
@@ -25,7 +23,9 @@ def get_dynamic_feature_importance(df, feature_cols, target_col='label', cumulat
     print(f"🧠 LightGBM оценивает важность {len(feature_cols)} признаков...")
     sample_df = df.sample(n=min(len(df), 100000), random_state=42)
     X = sample_df[feature_cols]
-    y = sample_df[target_col]
+    
+    # ФИКС: LightGBM требует метки классов 0, 1, 2. Сдвигаем наши [-1.0, 0.0, 1.0] -> [0, 1, 2]
+    y = (sample_df[target_col] + 1).astype(int)
     
     model = lgb.LGBMClassifier(n_estimators=100, random_state=42, n_jobs=-1, verbose=-1)
     model.fit(X, y)
@@ -51,19 +51,15 @@ def plot_importance(imp_df, top_n, save_path):
     plt.close()
 
 def main(args):
-    EXP_DIR = BASE_DIR / "experiments" / args.exp_name
-    ML_DATA_DIR = EXP_DIR / "dataset"
-    MODELS_DIR = EXP_DIR / "models"
-    MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    
-    train_path = ML_DATA_DIR / "train_scaled.csv"
+    train_path = Path(args.input)
     if not train_path.exists():
         print(f"❌ Датасет не найден: {train_path}"); return
 
-    print(f"🚀 Динамический отбор признаков для: {args.exp_name}")
-    df = pd.read_csv(train_path)
+    print(f"🚀 Динамический отбор признаков...")
+    df = pd.read_parquet(train_path)
     
-    exclude_cols = {'datetime', 'ticker', 'label'}
+    # Исключаем системные колонки, цены и таргеты
+    exclude_cols = {'datetime', 'ticker', 'target_tp', 'target_sl', 'target_return', 'label', 'open', 'high', 'low', 'close', 'volume'}
     feature_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c]) and c not in exclude_cols]
     
     if not args.skip_corr:
@@ -71,16 +67,25 @@ def main(args):
         
     top_features, imp_df = get_dynamic_feature_importance(df, feature_cols, cumulative_threshold=args.cum_threshold)
     
-    out_json = ML_DATA_DIR / "features_selected.json"
+    # Сохраняем JSON
+    out_json = Path(args.out_json)
+    out_json.parent.mkdir(parents=True, exist_ok=True)
     with open(out_json, "w", encoding="utf-8") as f:
         json.dump({"feature_order": top_features}, f, indent=2)
         
-    plot_importance(imp_df, len(top_features), MODELS_DIR / "dynamic_feature_importance.png")
+    # Сохраняем график
+    if args.out_plot:
+        out_plot = Path(args.out_plot)
+        out_plot.parent.mkdir(parents=True, exist_ok=True)
+        plot_importance(imp_df, len(top_features), out_plot)
+        
     print(f"✅ Отбор завершен! Выбрано: {len(top_features)} признаков. Сохранено в {out_json.name}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--exp_name", type=str, required=True)
+    parser.add_argument("--input", type=str, required=True, help="Путь к ml_data.parquet (Train)")
+    parser.add_argument("--out_json", type=str, required=True, help="Путь сохранения features_selected.json")
+    parser.add_argument("--out_plot", type=str, help="Путь сохранения графика")
     parser.add_argument("--cum_threshold", type=float, default=0.95)
     parser.add_argument("--corr_threshold", type=float, default=0.85)
     parser.add_argument("--skip_corr", action="store_true")
