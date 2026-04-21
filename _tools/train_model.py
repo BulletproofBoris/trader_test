@@ -43,7 +43,7 @@ class SmartBacktrackCallback(Callback):
         self.min_lr = min_lr
         self.max_rollbacks = max_rollbacks
         self.best_weights_path = str(best_weights_path)
-        self.stop_threshold = stop_threshold # Порог "плохого" лосса
+        self.stop_threshold = stop_threshold
         
         self.wait = 0
         self.rollback_count = 0
@@ -54,13 +54,11 @@ class SmartBacktrackCallback(Callback):
         current_loss = logs.get(self.monitor_loss)
         if current_loss is None: return
 
-        # 1. Проверка на безнадежность (если после 10 эпох лосс слишком высокий)
         if epoch > 10 and current_loss > self.stop_threshold and self.wait >= self.patience:
             print(f"\n⚠️ Итерация безнадежна (val_loss {current_loss:.4f} > {self.stop_threshold}). Пропускаем.")
             self.model.stop_training = True
             return
 
-        # 2. Логика улучшения
         if current_loss < self.best_loss - 1e-4:
             self.best_loss = current_loss
             self.best_epoch = epoch + 1
@@ -135,23 +133,25 @@ def create_model(seq_len, n_features, l2_reg=1e-5):
     x = LayerNormalization()(x)
     x = GlobalAveragePooling1D()(x)
     x = Dense(32, kernel_regularizer=regularizers.l2(l2_reg))(x)
-    # ФИКС ВОРОНИНГА: alpha -> negative_slope
     x = LeakyReLU(negative_slope=0.2)(x)
     x = Dropout(0.2)(x)
     outputs = Dense(3, activation='softmax', name='out', dtype='float32')(x)
     return Model(inputs=inputs, outputs=outputs)
 
 def save_record_model(model, history, acc, loss, train_time, run, args, seq_len, models_dir):
-    model_filename = f"trading_bot_best_acc_{acc*100:.2f}_run{run}.keras"
+    # Добавляем timestamp (время), чтобы файлы при --append не перезаписывали друг друга при совпадении номера run
+    timestamp = int(time.time())
+    model_filename = f"trading_bot_best_acc_{acc*100:.2f}_run{run}_{timestamp}.keras"
     model_filepath = models_dir / model_filename
     model.save(model_filepath)
     
-    meta_filepath = models_dir / f"trading_bot_best_acc_{acc*100:.2f}_run{run}_meta.json"
+    meta_filepath = models_dir / f"trading_bot_best_acc_{acc*100:.2f}_run{run}_{timestamp}_meta.json"
     clean_history = {k: [float(val) for val in v] for k, v in history.history.items()} if history else {}
     
     report = {
         "fold": args.fold,
         "run_id": str(run),
+        "timestamp": timestamp,
         "best_val_accuracy": float(acc),
         "val_loss": float(loss),
         "training_time_seconds": float(train_time),
@@ -168,7 +168,7 @@ def save_record_model(model, history, acc, loss, train_time, run, args, seq_len,
     with open(meta_filepath, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=4, ensure_ascii=False)
         
-    print(f"🏆 НОВЫЙ ГЛОБАЛЬНЫЙ РЕКОРД! Модель сохранена: {model_filename}")
+    print(f"🏆 НОВЫЙ РЕКОРД СОХРАНЕН: {model_filename}")
 
 def main(args):
     BASE_DIR = Path(__file__).resolve().parent.parent
@@ -177,8 +177,22 @@ def main(args):
     
     TFRECORDS_DIR = FOLD_DIR / "data"
     MODELS_DIR = FOLD_DIR / "models"
-    MODELS_DIR.mkdir(parents=True, exist_ok=True)
     ARTIFACTS_DIR = FOLD_DIR / "artifacts"
+    
+    # --- ЛОГИКА ПРОВЕРКИ СУЩЕСТВУЮЩИХ МОДЕЛЕЙ ---
+    if MODELS_DIR.exists() and any(MODELS_DIR.glob("*.keras")):
+        if args.force:
+            print(f"⚠️ Флаг --force: Очищаем папку моделей фолда [{args.fold}]...")
+            for f in MODELS_DIR.glob("*"): 
+                f.unlink()
+        elif args.append:
+            print(f"➕ Флаг --append: Модели в фолде [{args.fold}] существуют. Обучаем новые поверх старых.")
+        else:
+            print(f"✅ В фолде [{args.fold}] уже есть обученные модели.")
+            print("⏭️ Пропуск обучения. Используйте --force (перезапись) или --append (добавление).")
+            return
+                
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
     
     print(f"🚀 Старт обучения. Фолд: [{args.fold}]")
     
@@ -210,24 +224,22 @@ def main(args):
     global_best_acc = 0.0
 
     for run in range(1, args.runs + 1):
-        print(f"\n{'-'*50}\n🔄 ИТЕРАЦИЯ {run}/{args.runs} (Рекорд фолда: {global_best_acc*100:.2f}%)\n{'-'*50}")
+        print(f"\n{'-'*50}\n🔄 ИТЕРАЦИЯ {run}/{args.runs} (Лучшая точность сессии: {global_best_acc*100:.2f}%)\n{'-'*50}")
         
         tf.keras.backend.clear_session()
         model = create_model(seq_len, n_features, args.l2_reg)
         optimizer = tf.keras.optimizers.Adam(learning_rate=args.lr)
         model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=['accuracy'])
 
-        temp_weights_path = MODELS_DIR / f"temp_best_run.weights.h5"
+        temp_weights_path = MODELS_DIR / f"temp_best_run_{int(time.time())}.weights.h5"
         callbacks = [
             EarlyStopping(monitor='val_loss', patience=15, verbose=0, restore_best_weights=True),
-            # Скрываем вывод от чекпоинта
             ModelCheckpoint(filepath=temp_weights_path, save_weights_only=True, monitor='val_loss', mode='min', save_best_only=True, verbose=0),
             SmartBacktrackCallback(best_weights_path=temp_weights_path, monitor_loss='val_loss', patience=4, factor=0.5, min_lr=1e-6, max_rollbacks=2)
         ]
 
         start_time = time.time()
         try:
-            # ФИКС ИНТЕРФЕЙСА: verbose=2 (одна строка на эпоху)
             history = model.fit(
                 train_dataset, 
                 epochs=args.epochs, 
@@ -258,9 +270,11 @@ if __name__ == "__main__":
     parser.add_argument("--dataset_dir", type=str, default="data/processed/2000_2026_1d", help="Папка датасета")
     parser.add_argument("--fold", type=str, default="fold_2010", help="Имя фолда для обучения")
     parser.add_argument("--runs", type=int, default=10, help="Количество циклов инициализации весов")
-    parser.add_argument("--batch_size", type=int, default=512, help="Размер батча (снижен для совместимости)")
+    parser.add_argument("--batch_size", type=int, default=512, help="Размер батча")
     parser.add_argument("--epochs", type=int, default=50, help="Количество эпох")
     parser.add_argument("--lr", type=float, default=1e-3, help="Стартовый Learning Rate")
     parser.add_argument("--l2_reg", type=float, default=1e-5, help="L2 регуляризация")
+    parser.add_argument("--force", action="store_true", help="Принудительное обучение с удалением старых моделей")
+    parser.add_argument("--append", action="store_true", help="Добавить новые модели, не удаляя старые")
     args = parser.parse_args()
     main(args)
