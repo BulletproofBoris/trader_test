@@ -7,9 +7,11 @@ from pathlib import Path
 import warnings
 import numpy as np
 
-# Прячем логи TensorFlow
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+# Прячем системный спам
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Скрываем INFO и WARNING от C++ ядра TF
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+warnings.filterwarnings('ignore')         # Скрываем Python-ворнинги
+
 import tensorflow as tf
 
 tf.keras.mixed_precision.set_global_policy('mixed_float16')
@@ -33,7 +35,7 @@ if gpus:
         print(e)
 
 class SmartBacktrackCallback(Callback):
-    def __init__(self, best_weights_path, monitor_loss='val_loss', factor=0.5, patience=4, min_lr=1e-6, max_rollbacks=2):
+    def __init__(self, best_weights_path, monitor_loss='val_loss', factor=0.5, patience=4, min_lr=1e-6, max_rollbacks=2, stop_threshold=1.1):
         super(SmartBacktrackCallback, self).__init__()
         self.monitor_loss = monitor_loss
         self.factor = factor
@@ -41,6 +43,7 @@ class SmartBacktrackCallback(Callback):
         self.min_lr = min_lr
         self.max_rollbacks = max_rollbacks
         self.best_weights_path = str(best_weights_path)
+        self.stop_threshold = stop_threshold # Порог "плохого" лосса
         
         self.wait = 0
         self.rollback_count = 0
@@ -51,6 +54,13 @@ class SmartBacktrackCallback(Callback):
         current_loss = logs.get(self.monitor_loss)
         if current_loss is None: return
 
+        # 1. Проверка на безнадежность (если после 10 эпох лосс слишком высокий)
+        if epoch > 10 and current_loss > self.stop_threshold and self.wait >= self.patience:
+            print(f"\n⚠️ Итерация безнадежна (val_loss {current_loss:.4f} > {self.stop_threshold}). Пропускаем.")
+            self.model.stop_training = True
+            return
+
+        # 2. Логика улучшения
         if current_loss < self.best_loss - 1e-4:
             self.best_loss = current_loss
             self.best_epoch = epoch + 1
@@ -74,7 +84,7 @@ class SmartBacktrackCallback(Callback):
                 if old_lr > self.min_lr:
                     new_lr = max(old_lr * self.factor, self.min_lr)
                     self.model.optimizer.learning_rate.assign(new_lr)
-                    print(f'   📉 Снижаю learning rate до {new_lr:.0e}.')
+                    print(f"📉 Снижаю learning rate до {new_lr:.0e}.")
                     self.wait = 0
 
 def parse_tfrecord_fn(example, lookback, n_features):
@@ -89,11 +99,29 @@ def parse_tfrecord_fn(example, lookback, n_features):
     label.set_shape([3])
     return sequence, label
 
-def load_tfrecord_dataset(file_path, batch_size, lookback, n_features):
+def load_tfrecord_dataset(file_path, batch_size, lookback, n_features, is_training=True):
     dataset = tf.data.TFRecordDataset(str(file_path), num_parallel_reads=tf.data.AUTOTUNE)
     dataset = dataset.map(lambda x: parse_tfrecord_fn(x, lookback, n_features), num_parallel_calls=tf.data.AUTOTUNE)
-    dataset = dataset.cache().shuffle(10000).batch(batch_size).prefetch(tf.data.AUTOTUNE)
+    if is_training:
+        dataset = dataset.cache().shuffle(10000)
+    dataset = dataset.batch(batch_size).prefetch(tf.data.AUTOTUNE)
     return dataset
+
+def compute_class_weights_fast(tfrecord_path):
+    print("⚙️ Расчет идеальных весов классов...")
+    dataset = tf.data.TFRecordDataset(str(tfrecord_path))
+    class_counts = {0: 0, 1: 0, 2: 0}
+    feature_description = {'target': tf.io.FixedLenFeature([], tf.int64)}
+    
+    for raw_record in dataset:
+        parsed = tf.io.parse_single_example(raw_record, feature_description)
+        class_counts[int(parsed['target'].numpy())] += 1
+        
+    total = sum(class_counts.values())
+    weights = {c: total / (3.0 * max(1, count)) for c, count in class_counts.items()}
+    print(f"   Баланс: SL(0)={class_counts[0]}, Hold(1)={class_counts[1]}, TP(2)={class_counts[2]}")
+    print(f"   Веса:   SL(0)={weights[0]:.2f}, Hold(1)={weights[1]:.2f}, TP(2)={weights[2]:.2f}")
+    return weights
 
 def create_model(seq_len, n_features, l2_reg=1e-5):
     inputs = Input(shape=(seq_len, n_features), name="input_layer")
@@ -107,12 +135,13 @@ def create_model(seq_len, n_features, l2_reg=1e-5):
     x = LayerNormalization()(x)
     x = GlobalAveragePooling1D()(x)
     x = Dense(32, kernel_regularizer=regularizers.l2(l2_reg))(x)
-    x = LeakyReLU(alpha=0.2)(x)
+    # ФИКС ВОРОНИНГА: alpha -> negative_slope
+    x = LeakyReLU(negative_slope=0.2)(x)
     x = Dropout(0.2)(x)
     outputs = Dense(3, activation='softmax', name='out', dtype='float32')(x)
     return Model(inputs=inputs, outputs=outputs)
 
-def save_record_model(model, history, acc, loss, train_time, run, args, seq_len, models_dir, exp_config):
+def save_record_model(model, history, acc, loss, train_time, run, args, seq_len, models_dir):
     model_filename = f"trading_bot_best_acc_{acc*100:.2f}_run{run}.keras"
     model_filepath = models_dir / model_filename
     model.save(model_filepath)
@@ -121,7 +150,7 @@ def save_record_model(model, history, acc, loss, train_time, run, args, seq_len,
     clean_history = {k: [float(val) for val in v] for k, v in history.history.items()} if history else {}
     
     report = {
-        "experiment_info": exp_config,
+        "fold": args.fold,
         "run_id": str(run),
         "best_val_accuracy": float(acc),
         "val_loss": float(loss),
@@ -143,56 +172,70 @@ def save_record_model(model, history, acc, loss, train_time, run, args, seq_len,
 
 def main(args):
     BASE_DIR = Path(__file__).resolve().parent.parent
-    EXP_DIR = BASE_DIR / "experiments" / args.exp_name
-    TFRECORDS_DIR = EXP_DIR / "tfrecords"
-    MODELS_DIR = EXP_DIR / "models"
+    DATASET_DIR = BASE_DIR / args.dataset_dir
+    FOLD_DIR = DATASET_DIR / args.fold
+    
+    TFRECORDS_DIR = FOLD_DIR / "data"
+    MODELS_DIR = FOLD_DIR / "models"
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    ARTIFACTS_DIR = FOLD_DIR / "artifacts"
     
-    config_path = EXP_DIR / "exp_config.json"
-    if not config_path.exists():
-        print(f"❌ Паспорт эксперимента не найден: {config_path}"); return
-        
-    with open(config_path, 'r', encoding='utf-8') as f:
-        exp_config = json.load(f)
+    print(f"🚀 Старт обучения. Фолд: [{args.fold}]")
+    
+    dataset_meta_path = DATASET_DIR / "metadata.json"
+    if not dataset_meta_path.exists():
+        print(f"❌ Ошибка: {dataset_meta_path} не найден.")
+        return
+    with open(dataset_meta_path, 'r', encoding='utf-8') as f:
+        seq_len = json.load(f)["parameters"]["lookback"]
+
+    features_json = ARTIFACTS_DIR / "features_selected.json"
+    if not features_json.exists():
+        print(f"❌ Ошибка: {features_json} не найден.")
+        return
+    with open(features_json, 'r', encoding='utf-8') as f:
+        n_features = len(json.load(f).get("feature_order", []))
             
-    print(f"🚀 Старт обучения. Эксперимент: [{args.exp_name}]")
+    print(f"📊 Форма данных: [Lookback: {seq_len}, Features: {n_features}]")
     
-    with open(TFRECORDS_DIR / "metadata.json", 'r') as f:
-        metadata = json.load(f)
-        
-    seq_len = metadata['lookback']
-    n_features = metadata['n_features']
-    class_weights_dict = {int(k): v for k, v in metadata['class_weights'].items()}
+    train_record_path = TFRECORDS_DIR / "train" / "data.tfrecord"
+    val_record_path = TFRECORDS_DIR / "val" / "data.tfrecord"
     
-    print("⏳ Загрузка датасетов в память GPU...")
-    train_dataset = load_tfrecord_dataset(TFRECORDS_DIR / "train.tfrecord", args.batch_size, seq_len, n_features)
-    val_dataset = tf.data.TFRecordDataset(str(TFRECORDS_DIR / "test.tfrecord"))
-    val_dataset = val_dataset.map(lambda x: parse_tfrecord_fn(x, seq_len, n_features), num_parallel_calls=tf.data.AUTOTUNE)
-    val_dataset = val_dataset.batch(args.batch_size).prefetch(tf.data.AUTOTUNE)
+    class_weights_dict = compute_class_weights_fast(train_record_path)
+    
+    print("⏳ Подготовка конвейера данных...")
+    train_dataset = load_tfrecord_dataset(train_record_path, args.batch_size, seq_len, n_features, is_training=True)
+    val_dataset = load_tfrecord_dataset(val_record_path, args.batch_size, seq_len, n_features, is_training=False)
 
     global_best_acc = 0.0
-    global_best_run = "None"
 
     for run in range(1, args.runs + 1):
-        print(f"\n{'='*60}\n🔄 ИТЕРАЦИЯ {run} / {args.runs} (Рекорд: {global_best_acc*100:.2f}%)\n{'='*60}")
+        print(f"\n{'-'*50}\n🔄 ИТЕРАЦИЯ {run}/{args.runs} (Рекорд фолда: {global_best_acc*100:.2f}%)\n{'-'*50}")
         
         tf.keras.backend.clear_session()
         model = create_model(seq_len, n_features, args.l2_reg)
         optimizer = tf.keras.optimizers.Adam(learning_rate=args.lr)
         model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=['accuracy'])
 
-        if run == 1: model.summary()
-        
         temp_weights_path = MODELS_DIR / f"temp_best_run.weights.h5"
         callbacks = [
-            EarlyStopping(monitor='val_loss', patience=15, verbose=1, restore_best_weights=True),
-            ModelCheckpoint(filepath=temp_weights_path, save_weights_only=True, monitor='val_loss', mode='min', save_best_only=True),
+            EarlyStopping(monitor='val_loss', patience=15, verbose=0, restore_best_weights=True),
+            # Скрываем вывод от чекпоинта
+            ModelCheckpoint(filepath=temp_weights_path, save_weights_only=True, monitor='val_loss', mode='min', save_best_only=True, verbose=0),
             SmartBacktrackCallback(best_weights_path=temp_weights_path, monitor_loss='val_loss', patience=4, factor=0.5, min_lr=1e-6, max_rollbacks=2)
         ]
 
         start_time = time.time()
         try:
-            history = model.fit(train_dataset, epochs=args.epochs, validation_data=val_dataset, callbacks=callbacks, class_weight=class_weights_dict, verbose=1)
+            # ФИКС ИНТЕРФЕЙСА: verbose=2 (одна строка на эпоху)
+            history = model.fit(
+                train_dataset, 
+                epochs=args.epochs, 
+                validation_data=val_dataset, 
+                callbacks=callbacks, 
+                class_weight=class_weights_dict, 
+                verbose=2
+            )
         except KeyboardInterrupt:
             print("\n⚠️ Multi-Run прерван пользователем.")
             break
@@ -204,18 +247,18 @@ def main(args):
             os.remove(temp_weights_path)
             
         loss, acc = model.evaluate(val_dataset, verbose=0)
-        print(f"🎯 Точность итерации {run}: {acc*100:.2f}%")
+        print(f"\n🎯 Точность итерации {run}: {acc*100:.2f}%")
 
         if acc > global_best_acc:
             global_best_acc = acc
-            global_best_run = str(run)
-            save_record_model(model, history, acc, loss, train_time, run, args, seq_len, MODELS_DIR, exp_config)
+            save_record_model(model, history, acc, loss, train_time, run, args, seq_len, MODELS_DIR)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--exp_name", type=str, required=True, help="Имя папки эксперимента")
-    parser.add_argument("--runs", type=int, default=100, help="Количество циклов")
-    parser.add_argument("--batch_size", type=int, default=2048, help="Размер батча")
+    parser.add_argument("--dataset_dir", type=str, default="data/processed/2000_2026_1d", help="Папка датасета")
+    parser.add_argument("--fold", type=str, default="fold_2010", help="Имя фолда для обучения")
+    parser.add_argument("--runs", type=int, default=10, help="Количество циклов инициализации весов")
+    parser.add_argument("--batch_size", type=int, default=512, help="Размер батча (снижен для совместимости)")
     parser.add_argument("--epochs", type=int, default=50, help="Количество эпох")
     parser.add_argument("--lr", type=float, default=1e-3, help="Стартовый Learning Rate")
     parser.add_argument("--l2_reg", type=float, default=1e-5, help="L2 регуляризация")
