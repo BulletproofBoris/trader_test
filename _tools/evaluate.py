@@ -25,25 +25,22 @@ from train_rllib_pbt import RLlibPortfolioEnv, env_creator
 def run_evaluation():
     # Настройки путей
     CHECKPOINT = "/home/restorator/trader_test/experiments/rl_trader/ray_results/pbt_portfolio_run/PPO_portfolio_env_83d81_00001_1_2026-04-20_12-51-33/checkpoint_000017"
-    DATASET_PATH = Path("/home/restorator/trader_test/experiments/rl_trader/rl_train_dataset.csv")
+    DATASET_PATH = Path("/home/restorator/trader_test/experiments/rl_trader/rl_test_dataset.csv")
     OUTPUT_DIR = Path("/home/restorator/trader_test/experiments/rl_trader")
     
     INITIAL_BALANCE = 100000.0
     COMMISSION = 0.0005
 
-    print(f"📂 Загрузка данных...")
+    print(f"📂 Загрузка тестовых данных (2026 год)...")
     df = pd.read_csv(DATASET_PATH)
     df['datetime'] = pd.to_datetime(df['datetime'])
-    all_tickers = sorted(df['ticker'].unique())
-
-    # --- НАСТРОЙКА ПЕРИОДА ТЕСТИРОВАНИЯ ---
-    # По умолчанию берем последние 4 месяца из доступных данных
-    split_date = df['datetime'].max() - pd.DateOffset(months=4)
     
-    # ЕСЛИ ХОЧЕШЬ ЖЕСТКО ЗАДАТЬ ДАТУ (например, 2026 год), раскомментируй строку ниже:
-    # split_date = pd.to_datetime('2026-01-01')
+    # ФИКС: Берем эталонный список тикеров из файла обучения, чтобы нейросеть не сломалась!
+    TRAIN_PATH = Path("/home/restorator/trader_test/experiments/rl_trader/rl_train_dataset.csv")
+    train_df = pd.read_csv(TRAIN_PATH)
+    all_tickers = sorted(train_df['ticker'].unique())
     
-    test_df = df[df['datetime'] >= split_date].copy()
+    test_df = df.copy() 
     test_dates = sorted(test_df['datetime'].unique())
 
     # Инициализация
