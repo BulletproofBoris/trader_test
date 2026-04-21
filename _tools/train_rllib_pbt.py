@@ -8,153 +8,91 @@ from gymnasium import spaces
 import logging
 import warnings
 
-# --- ГЛУШИМ СИСТЕМНЫЙ СПАМ И ГИГАНТСКИЕ ТАБЛИЦЫ ---
+# --- ГЛУШИМ СИСТЕМНЫЙ СПАМ ---
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 os.environ["RAY_DEDUP_LOGS"] = "0"
 os.environ["RAY_IGNORE_UNHANDLED_ERRORS"] = "1"
-os.environ["RAY_TUNE_DISABLE_RICH_OUTPUT"] = "1" # Отключает огромные рамки в консоли
+os.environ["RAY_TRAIN_ENABLE_V2_MIGRATION_WARNINGS"] = "0"
 warnings.filterwarnings("ignore")
 
 import ray
-from ray import train, tune
-from ray.tune import CLIReporter
+from ray import tune
 from ray.tune.schedulers import PopulationBasedTraining
 from ray.rllib.algorithms.ppo import PPOConfig
 from ray.tune.registry import register_env
 
+# Импортируем нашу новую среду
+from _tools.rl_env import TradingEnv
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # --- 1. АДАПТАЦИЯ СРЕДЫ ПОД RLLIB ---
-class RLlibPortfolioEnv(gym.Env):
-    def __init__(self, env_config):
-        super().__init__()
-        self.df = env_config["df"].copy()
-        self.tickers = env_config["all_tickers"]
-        self.commission = env_config.get("commission", 0.0005)
-        self.initial_balance = env_config.get("initial_balance", 100000.0)
-        
-        self.dates = sorted(self.df['datetime'].unique())
-        self.num_assets = len(self.tickers)
-        
-        prob_cols = sorted([c for c in self.df.columns if 'prob_' in c])
-        self.num_features = len(prob_cols)
-        
-        worker_idx = env_config.worker_index if hasattr(env_config, "worker_index") else 0
-        if worker_idx == 1:
-            print(f"Формирование 3D тензоров рынка...")
-            
-        # БРОНЯ №1: Жесткая очистка сырых данных. Убиваем нули, минусы и маркеры ошибок
-        self.df['close'] = self.df['close'].apply(lambda x: np.nan if x <= 0 else x)
-        self.df = self.df.replace([-9999.0, np.inf, -np.inf], np.nan)
-            
-        self.obs_tensor = np.zeros((len(self.dates), self.num_assets, self.num_features), dtype=np.float32)
-        for i, date in enumerate(self.dates):
-            day_data = self.df[self.df['datetime'] == date].set_index('ticker')
-            for j, ticker in enumerate(self.tickers):
-                if ticker in day_data.index:
-                    vals = day_data.loc[ticker, prob_cols].fillna(0.0).values
-                    self.obs_tensor[i, j, :] = vals
-                elif i > 0:
-                    self.obs_tensor[i, j, :] = self.obs_tensor[i-1, j, :]
-                        
-        # БРОНЯ №2: Идеально чистая матрица цен без разрывов
-        pivot_close = self.df.pivot(index='datetime', columns='ticker', values='close')
-        pivot_close = pivot_close.reindex(columns=self.tickers)
-        pivot_close = pivot_close.ffill().bfill().fillna(1.0)
-        self.price_matrix = pivot_close[self.tickers].values.astype(np.float32)
-        
-        self.action_space = spaces.Box(low=-10, high=10, shape=(self.num_assets + 1,), dtype=np.float32)
-        obs_shape = (self.num_assets * self.num_features) + (self.num_assets + 1)
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(obs_shape,), dtype=np.float32)
-
-    def reset(self, seed=None, options=None):
-        super().reset(seed=seed)
-        self.current_step = 0
-        self.balance = self.initial_balance
-        self.weights = np.zeros(self.num_assets + 1, dtype=np.float32)
-        self.weights[0] = 1.0 
-        return self._get_obs(), {}
-
-    def _get_obs(self):
-        market_state = self.obs_tensor[self.current_step].flatten()
-        obs = np.concatenate([market_state, self.weights]).astype(np.float32)
-        # БРОНЯ №3: Запрещаем NaN в наблюдениях
-        return np.nan_to_num(obs, nan=0.0)
-
-    def step(self, action):
-        if np.isnan(action).any():
-            action = np.zeros_like(action)
-            
-        exp_a = np.exp(action - np.max(action)) 
-        target_weights = exp_a / exp_a.sum()
-        
-        transaction_cost = np.sum(np.abs(target_weights - self.weights)) * self.commission
-        self.weights = target_weights
-        
-        self.current_step += 1
-        done = self.current_step >= len(self.dates) - 1
-        
-        if done:
-            return self._get_obs(), 0.0, done, False, {}
-
-        price_change = self.price_matrix[self.current_step] / self.price_matrix[self.current_step - 1]
-        
-        # БРОНЯ №4: Режем аномалии. Акция не может упасть больше чем на 99% за день
-        price_change = np.clip(price_change, 0.01, 10.0)
-        
-        portfolio_return = self.weights[0] + np.sum(self.weights[1:] * price_change) - 1.0
-        net_return = portfolio_return - transaction_cost
-        
-        if not np.isnan(net_return):
-            self.balance = max(0.0, self.balance * (1 + net_return))
-        
-        reward = net_return if net_return > 0 else net_return * 2.0
-        if np.isnan(reward): reward = -1.0
-
-        return self._get_obs(), reward, done, False, {}
-
-# --- 2. РЕГИСТРАЦИЯ СРЕДЫ ---
 def env_creator(env_config):
-    return RLlibPortfolioEnv(env_config)
+    # Теперь просто прокидываем словарь настроек в среду
+    return TradingEnv(env_config)
 
-register_env("portfolio_env", env_creator)
+register_env("TradingEnv-v0", env_creator)
 
-# --- ИСПРАВЛЕНИЕ ОШИБОК МУТАЦИИ PBT ---
-def custom_explore_fn(config):
-    """Принудительно конвертируем типы и защищаем батчи от краша"""
-    if "lr" in config:
-        config["lr"] = float(config["lr"])
-    if "entropy_coeff" in config:
-        config["entropy_coeff"] = float(config["entropy_coeff"])
-    if "clip_param" in config:
-        config["clip_param"] = float(config["clip_param"])
-        
-    # Защита от ошибки кратного батча
-    if "train_batch_size" in config:
-        batch_size = int(config["train_batch_size"])
-        config["train_batch_size"] = batch_size
-        # Минибатч всегда кратен основному батчу (1/4 часть)
-        config["minibatch_size"] = batch_size // 4 
-        
-    return config
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--iterations', type=int, default=50, help='Количество поколений эволюции')
+    parser.add_argument('--population', type=int, default=4, help='Размер популяции агентов')
+    args = parser.parse_args()
 
-# --- 3. НАСТРОЙКА И ЗАПУСК ЭВОЛЮЦИИ ---
-def main(args):
-    ray.init(ignore_reinit_error=True, log_to_driver=False, logging_level=logging.ERROR)
+    RL_DIR = BASE_DIR / "data" / "processed" / "2000_2026_1d" / "rl_env"
+    DATA_PATH = RL_DIR / "environment_data.parquet"
     
-    RL_DIR = BASE_DIR / "experiments" / "rl_trader"
-    dataset_path = RL_DIR / "rl_train_dataset.csv"  
-    
-    print("⏳ Загрузка датасета...")
-    df = pd.read_csv(dataset_path)
-    df['datetime'] = pd.to_datetime(df['datetime'])
-    all_tickers = sorted(df['ticker'].unique())
-    
-    split_date = df['datetime'].max() - pd.DateOffset(months=4)
-    train_df = df[df['datetime'] < split_date]
-    val_df = df[df['datetime'] >= split_date]
+    if not DATA_PATH.exists():
+        print(f"❌ Файл с данными не найден: {DATA_PATH}")
+        return
 
-    # --- НАСТРОЙКА PBT ---
+    # МЫ БОЛЬШЕ НЕ ГРУЗИМ DATAFRAME ЗДЕСЬ! Защита от OOM (утечки памяти)
+    env_config = {
+        "data_path": str(DATA_PATH),
+        "split_mode": "train", # Основные воркеры учатся на периоде до 2022 года
+        "commission": 0.0003,
+        "initial_balance": 100000.0,
+        "max_episode_steps": 252
+    }
+
+    print("🚀 Инициализация Ray Cluster...")
+    ray.init(ignore_reinit_error=True, logging_level=logging.ERROR)
+
+    # --- 2. БАЗОВАЯ КОНФИГУРАЦИЯ PPO ---
+    config = (
+        PPOConfig()
+        .environment("TradingEnv-v0", env_config=env_config)
+        .framework("torch")
+        .training(
+            model={
+                "fcnet_hiddens": [256, 256],
+                "fcnet_activation": "relu",
+            },
+            lr=1e-4,
+            train_batch_size=1024,
+            minibatch_size=128,
+            entropy_coeff=0.01,
+            clip_param=0.2,
+        )
+        .env_runners(
+            num_env_runners=1,
+            rollout_fragment_length=1024
+        )
+        # ======= 3. МАГИЯ ТЕСТИРОВАНИЯ (Out-of-Sample) =======
+        .evaluation(
+            evaluation_interval=5,    # Каждые 5 итераций делаем экзамен
+            evaluation_duration=5,    # Длительность экзамена: 5 лет/эпизодов
+            evaluation_config={
+                "env_config": {
+                    "split_mode": "test" # Среда экзамена грузит данные после 2022 года
+                },
+                "explore": False      # На экзамене агент НЕ экспериментирует, только торгует
+            }
+        )
+        .resources(num_gpus=1 if ray.cluster_resources().get("GPU", 0) > 0 else 0)
+    )
+
+    # --- 4. НАСТРОЙКА ЭВОЛЮЦИИ (PBT) ---
     pbt = PopulationBasedTraining(
         time_attr="training_iteration",
         perturbation_interval=5,
@@ -162,98 +100,50 @@ def main(args):
         hyperparam_mutations={
             "lr": tune.loguniform(1e-5, 1e-3),
             "entropy_coeff": tune.uniform(0.001, 0.05),
-            # Только крупные батчи для плотной загрузки видеокарты
-            "train_batch_size": [4096, 8192, 16384], 
             "clip_param": tune.uniform(0.1, 0.3),
         },
-        custom_explore_fn=custom_explore_fn
+        custom_explore_fn=None,
     )
 
-    config = (
-        PPOConfig()
-        .api_stack(
-            enable_rl_module_and_learner=False,
-            enable_env_runner_and_connector_v2=False,
-        )
-        .environment("portfolio_env", env_config={"df": train_df, "all_tickers": all_tickers, "commission": args.commission})
-        .framework("torch")
-        # 1 воркер собирает данные сразу с 8 сред (разгоняем сбор)
-        .env_runners(num_env_runners=1, num_envs_per_env_runner=8) 
-        # Выделяем ровно половину видеокарты (так как по CPU влезет только 2 агента)
-        .resources(num_gpus=0.5) 
-        .training(
-            model={
-                "use_lstm": True,
-                "lstm_cell_size": 256,       
-                "fcnet_hiddens": [512, 512], 
-                "max_seq_len": 20,
-            },
-            lr=3e-4,
-            entropy_coeff=0.01,
-            train_batch_size=8192, 
-            minibatch_size=2048,
-            num_epochs=10,
-        )
-        .evaluation(
-            evaluation_interval=5,
-            evaluation_num_env_runners=1, 
-            evaluation_config={"env_config": {"df": val_df, "all_tickers": all_tickers}}
-        )
-        .debugging(log_level="ERROR") 
-    )
+    print(f"\n🧬 Запуск Population-Based Training (PBT)...")
+    print(f"   Популяция: {args.population} агентов")
+    print(f"   Поколений: {args.iterations} (можно остановить вручную)\n")
 
-    # --- НАСТРОЙКА КОМПАКТНОГО ВЫВОДА В КОНСОЛЬ ---
-    reporter = CLIReporter(
-        parameter_columns={
-            "lr": "Learn Rate", 
-            "entropy_coeff": "Entropy",
-            "train_batch_size": "Batch"
-        },
-        metric_columns={
-            "training_iteration": "Iter",
-            "env_runners/episode_return_mean": "Profit",
-            "time_total_s": "Time(s)"
-        },
-        max_progress_rows=args.population, 
-        max_report_frequency=15 
-    )
-
-    print(f"🚀 Старт PBT: Популяция из {args.population} агентов. Идет обучение...")
-    
     tuner = tune.Tuner(
         "PPO",
         tune_config=tune.TuneConfig(
-            metric="env_runners/episode_return_mean", 
+            metric="env_runners/episode_return_mean",
             mode="max",
             scheduler=pbt,
             num_samples=args.population,
         ),
         param_space=config,
         run_config=tune.RunConfig(
-            name="pbt_portfolio_run",
+            name="pbt_trading_bot",
             storage_path=str(RL_DIR / "ray_results"),
-            stop={"training_iteration": args.iterations},
-            verbose=1, 
-            progress_reporter=reporter # Выводим нашу красивую табличку
         )
     )
     
-    results = tuner.fit()
+    print("\n⚠️ ВНИМАНИЕ: Алгоритм будет эволюционировать.")
+    print("Когда увидите в таблице хорошую прибыль, нажмите STOP в Jupyter (или Ctrl+C в терминале).")
+    print("Скрипт перехватит сигнал и безопасно достанет лучшего агента с диска!\n")
+
+    try:
+        results = tuner.fit()
+    except KeyboardInterrupt:
+        print("\n\n🛑 Остановка эволюции пользователем! Извлекаем лучших мутантов с диска...")
+        restored_tuner = tune.Tuner.restore(str(RL_DIR / "ray_results" / "pbt_trading_bot"))
+        results = restored_tuner.get_results()
     
     if results.errors:
         print("\n❌ Во время обучения произошли ошибки! Проверьте логи в папке ray_results.")
     else:
         best_result = results.get_best_result("env_runners/episode_return_mean", "max") 
         print(f"\n🏆 Эволюция успешно завершена!")
-        if best_result.checkpoint:
+        if best_result and best_result.checkpoint:
             print(f"Лучший агент сохранен в: {best_result.checkpoint.path}")
-            print(f"Доходность лучшего агента: {best_result.metrics['env_runners']['episode_return_mean']:.2f}")
-        print(f"Идеальные гиперпараметры: LR={best_result.config['lr']:.6f}, Batch={best_result.config['train_batch_size']}")
+            print(f"Доходность лучшего агента (Train Reward Mean): {best_result.metrics.get('env_runners', {}).get('episode_return_mean', 0):.4f}")
+        print(f"Идеальные гиперпараметры: LR={best_result.config['lr']:.6f}, Entropy={best_result.config['entropy_coeff']:.4f}")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--iterations', type=int, default=100)
-    parser.add_argument('--population', type=int, default=4)
-    parser.add_argument('--commission', type=float, default=0.0005)
-    args = parser.parse_args()
-    main(args)
+    main()
