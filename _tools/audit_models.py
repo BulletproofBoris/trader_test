@@ -1,11 +1,12 @@
 import os
-import json
 import pandas as pd
 from pathlib import Path
+import re
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 RL_DIR = BASE_DIR / "data" / "processed" / "2000_2026_1d" / "rl_env"
 RESULTS_DIR = RL_DIR / "ray_results" / "pbt_trading_bot"
+SUMMARY_FILE = RL_DIR / "training_summary.txt"
 LOG_FILE = RL_DIR / "audit_log.txt"
 
 def classify_model(train_ret, test_ret):
@@ -18,42 +19,66 @@ def classify_model(train_ret, test_ret):
     else:
         return "💤 Слабый (Underfit)"
 
+def get_latest_checkpoint(trial_id):
+    """Ищет самую свежую папку checkpoint_... для заданного trial_id"""
+    for item in os.listdir(RESULTS_DIR):
+        if trial_id in item and os.path.isdir(os.path.join(RESULTS_DIR, item)):
+            trial_path = os.path.join(RESULTS_DIR, item)
+            checkpoints = [d for d in os.listdir(trial_path) if d.startswith("checkpoint_")]
+            if checkpoints:
+                # Сортируем по номеру итерации в названии
+                checkpoints.sort(key=lambda x: int(re.search(r'\d+', x).group()))
+                latest_cp = checkpoints[-1]
+                iteration = int(re.search(r'\d+', latest_cp).group())
+                return trial_path, iteration
+    return None, None
+
 def audit_models():
     data = []
-    print("🔍 Сканирование истории и наличия файлов чекпоинтов...")
+    print("🔍 Чтение статистики из training_summary.txt и поиск чекпоинтов...")
     
-    for root, dirs, files in os.walk(RESULTS_DIR):
-        if "result.json" in files:
-            folder_name = Path(root).name
-            parts = folder_name.split("_")
-            trial_id = "_".join(parts[2:4]) if len(parts) >= 4 else folder_name
+    if not SUMMARY_FILE.exists():
+        print(f"❌ Файл {SUMMARY_FILE} не найден. Сначала запустите обучение.")
+        return pd.DataFrame()
+
+    with open(SUMMARY_FILE, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+
+    # Парсим нашу текстовую таблицу
+    start_parsing = False
+    for line in lines:
+        if line.startswith("---"):
+            start_parsing = True
+            continue
+        if start_parsing:
+            if not line.strip() or line.startswith("*"):
+                continue # Конец таблицы
             
-            with open(os.path.join(root, "result.json"), "r", encoding="utf-8") as f:
-                for line in f:
-                    try:
-                        res = json.loads(line)
-                        iteration = res.get("training_iteration", 0)
-                        
-                        train_ret = res.get("env_runners", {}).get("episode_return_mean")
-                        eval_ret = res.get("evaluation", {}).get("env_runners", {}).get("episode_return_mean")
-                        
-                        if train_ret is not None and eval_ret is not None:
-                            # ПРОВЕРКА НАЛИЧИЯ ФАЙЛА НА ДИСКЕ
-                            checkpoint_name = f"checkpoint_{str(iteration).zfill(6)}"
-                            full_path = os.path.join(root, checkpoint_name)
-                            
-                            if os.path.exists(full_path):
-                                data.append({
-                                    "Trial_ID": trial_id, 
-                                    "Iteration": iteration,
-                                    "Train_Ret": round(train_ret, 2), 
-                                    "Test_Ret": round(eval_ret, 2), 
-                                    "Path": root
-                                })
-                    except: pass
+            parts = [p.strip() for p in line.split('|')]
+            if len(parts) >= 4:
+                trial_id = parts[0]
+                status = parts[1]
+                
+                try:
+                    train_ret = float(parts[2])
+                    test_ret = float(parts[3])
+                except ValueError:
+                    continue # Пропускаем "WAITING..." и прочее
+                
+                # Ищем физическую папку чекпоинта для этого trial_id
+                trial_path, iteration = get_latest_checkpoint(trial_id)
+                
+                if trial_path and iteration:
+                    data.append({
+                        "Trial_ID": trial_id,
+                        "Iteration": iteration,
+                        "Train_Ret": round(train_ret, 2),
+                        "Test_Ret": round(test_ret, 2),
+                        "Path": trial_path
+                    })
 
     if not data:
-        print("❌ Не найдено ни одного сохраненного чекпоинта с метриками оценки.")
+        print("❌ Не удалось извлечь данные или найти физические чекпоинты на диске.")
         return pd.DataFrame()
 
     df = pd.DataFrame(data)
@@ -63,8 +88,7 @@ def audit_models():
     top_models = df[df["Status"].str.contains("ПЕРСПЕКТИВНЫЙ")].sort_values("Test_Ret", ascending=False).head(15)
 
     if top_models.empty:
-        # Если перспективных нет, давай возьмем топ-15 вообще любых существующих
-        print("⚠️ 'Идеальных' моделей не найдено. Берем топ-15 доступных...")
+        print("⚠️ 'Идеальных' моделей не найдено. Берем все доступные...")
         top_models = df.sort_values("Test_Ret", ascending=False).head(15)
 
     output = []
