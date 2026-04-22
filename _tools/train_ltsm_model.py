@@ -123,19 +123,38 @@ def compute_class_weights_fast(tfrecord_path):
 
 def create_model(seq_len, n_features, l2_reg=1e-5):
     inputs = Input(shape=(seq_len, n_features), name="input_layer")
-    x = Dense(32, activation='linear', name='fp16_projection')(inputs)
+    
+    # 1. Проекция для FP16
+    x = Dense(64, activation='linear', name='fp16_projection')(inputs)
+    
+    # 2. Первый блок BiGRU + SpatialDropout1D
+    # SpatialDropout выключает целые признаки на всю длину окна, заставляя сеть быть устойчивой
     x = Bidirectional(GRU(64, return_sequences=True, kernel_regularizer=regularizers.l2(l2_reg)))(x)
-    x = Dropout(0.2)(x)
+    x = tf.keras.layers.SpatialDropout1D(0.2)(x)
+    
+    # 3. Второй блок BiGRU + SpatialDropout1D
     x = Bidirectional(GRU(64, return_sequences=True, kernel_regularizer=regularizers.l2(l2_reg)))(x)
-    res_x = Dropout(0.2)(x)
-    attn_out = Attention()([res_x, res_x])
+    res_x = tf.keras.layers.SpatialDropout1D(0.2)(x)
+    
+    # 4. Multi-Head Attention (4 головы)
+    # Позволяет сети одновременно обращать внимание на разные участки графика
+    attn_out = tf.keras.layers.MultiHeadAttention(num_heads=4, key_dim=32)(res_x, res_x)
+    
+    # Residual connection (остаточная связь) + Нормализация
     x = Add()([res_x, attn_out])
     x = LayerNormalization()(x)
+    
+    # Схлопываем временную ось
     x = GlobalAveragePooling1D()(x)
-    x = Dense(32, kernel_regularizer=regularizers.l2(l2_reg))(x)
+    
+    # Финальный полносвязный слой
+    x = Dense(64, kernel_regularizer=regularizers.l2(l2_reg))(x)
     x = LeakyReLU(negative_slope=0.2)(x)
     x = Dropout(0.2)(x)
+    
+    # ВАЖНО: При использовании mixed_float16, выходной слой обязан быть в float32
     outputs = Dense(3, activation='softmax', name='out', dtype='float32')(x)
+    
     return Model(inputs=inputs, outputs=outputs)
 
 def save_record_model(model, history, acc, loss, train_time, run, args, seq_len, models_dir):
