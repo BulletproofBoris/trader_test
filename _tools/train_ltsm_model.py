@@ -17,11 +17,11 @@ import tensorflow as tf
 tf.keras.mixed_precision.set_global_policy('mixed_float16')
 print("✅ Mixed precision включена!")
 
-from tensorflow.keras.models import Model
 from tensorflow.keras.layers import (
-    Input, GRU, Bidirectional, Dense, Dropout, Attention,
-    Add, LayerNormalization, GlobalAveragePooling1D, LeakyReLU
+    Input, Dense, GRU, Bidirectional, Dropout, Attention,
+    Add, LayerNormalization, GlobalAveragePooling1D, GlobalMaxPooling1D, Concatenate, Activation
 )
+from tensorflow.keras.models import Model
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, Callback
 from tensorflow.keras import regularizers
 
@@ -127,29 +127,30 @@ def create_model(seq_len, n_features, l2_reg=1e-5):
     # 1. Проекция для FP16
     x = Dense(64, activation='linear', name='fp16_projection')(inputs)
     
-    # 2. Первый блок BiGRU + SpatialDropout1D
-    # SpatialDropout выключает целые признаки на всю длину окна, заставляя сеть быть устойчивой
+    # 2. Первый блок BiGRU
     x = Bidirectional(GRU(64, return_sequences=True, kernel_regularizer=regularizers.l2(l2_reg)))(x)
-    x = tf.keras.layers.SpatialDropout1D(0.2)(x)
+    x = Dropout(0.2)(x)
     
-    # 3. Второй блок BiGRU + SpatialDropout1D
+    # 3. Второй блок BiGRU
     x = Bidirectional(GRU(64, return_sequences=True, kernel_regularizer=regularizers.l2(l2_reg)))(x)
-    res_x = tf.keras.layers.SpatialDropout1D(0.2)(x)
+    res_x = Dropout(0.2)(x)
     
-    # 4. Multi-Head Attention (4 головы)
-    # Позволяет сети одновременно обращать внимание на разные участки графика
-    attn_out = tf.keras.layers.MultiHeadAttention(num_heads=4, key_dim=32)(res_x, res_x)
+    # 4. Классический Attention
+    attn_out = Attention()([res_x, res_x])
     
-    # Residual connection (остаточная связь) + Нормализация
+    # Residual connection + Нормализация
     x = Add()([res_x, attn_out])
     x = LayerNormalization()(x)
     
-    # Схлопываем временную ось
-    x = GlobalAveragePooling1D()(x)
+    # 5. ДВОЙНОЙ ПУЛИНГ (Секретное оружие для Time-Series)
+    # Собираем и общую картину (тренд), и экстремальные выбросы (шпильки/объемы)
+    avg_pool = GlobalAveragePooling1D()(x)
+    max_pool = GlobalMaxPooling1D()(x)
+    x = Concatenate()([avg_pool, max_pool]) # Склеиваем векторы
     
-    # Финальный полносвязный слой
+    # 6. Финальный полносвязный слой с современной активацией GELU
     x = Dense(64, kernel_regularizer=regularizers.l2(l2_reg))(x)
-    x = LeakyReLU(negative_slope=0.2)(x)
+    x = Activation('gelu')(x)
     x = Dropout(0.2)(x)
     
     # ВАЖНО: При использовании mixed_float16, выходной слой обязан быть в float32
@@ -248,7 +249,11 @@ def main(args):
         tf.keras.backend.clear_session()
         model = create_model(seq_len, n_features, args.l2_reg)
         optimizer = tf.keras.optimizers.Adam(learning_rate=args.lr)
-        model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=['accuracy'])
+        model.compile(
+            optimizer=optimizer,
+            loss=tf.keras.losses.CategoricalCrossentropy(label_smoothing=0.1),
+            metrics=['accuracy']
+        )
 
         temp_weights_path = MODELS_DIR / f"temp_best_run_{int(time.time())}.weights.h5"
         callbacks = [
