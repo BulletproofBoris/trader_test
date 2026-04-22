@@ -13,6 +13,7 @@ def main():
     parser.add_argument("--epochs", type=int, default=100, help="Количество эпох обучения")
     parser.add_argument("--l2_reg", type=str, default="1e-4", help="Коэффициент L2 регуляризации")
     parser.add_argument("--lr", type=str, default="1e-3", help="Стартовый Learning Rate")
+    parser.add_argument("--start_fold", type=str, default=None, help="Имя фолда, с которого начать (например, fold_2018)")
     
     # Флаги-переключатели (если переданы - значит True, иначе False)
     parser.add_argument("--append", action="store_true", help="Дообучать поверх существующих моделей")
@@ -32,6 +33,16 @@ def main():
 
     # Получаем список папок fold_
     folds = sorted([d for d in DATASET_DIR.glob("fold_*") if d.is_dir()])
+
+    if args.start_fold:
+        fold_names = [f.name for f in folds]
+        if args.start_fold in fold_names:
+            start_idx = fold_names.index(args.start_fold)
+            folds = folds[start_idx:] # Отрезаем все фолды до нужного
+            print(f"⏭️ Пропускаем завершенные фолды. Начинаем строго с: {args.start_fold}")
+        else:
+            print(f"❌ Ошибка: Фолд {args.start_fold} не найден в директории!")
+            sys.exit(1)
 
     if not folds:
         print("⚠️ Фолды для обучения не найдены.")
