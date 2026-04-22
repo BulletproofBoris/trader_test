@@ -26,20 +26,20 @@ data/*
 !data/processed/
 data/processed/*
 
-!data/processed/2000_2026_1d/
-data/processed/2000_2026_1d/*
+!data/processed/2000_2026_1d_60_10/
+data/processed/2000_2026_1d_60_10/*
 
-!data/processed/2000_2026_1d/fold_*/
-data/processed/2000_2026_1d/fold_*/*
+!data/processed/2000_2026_1d_60_10/fold_*/
+data/processed/2000_2026_1d_60_10/fold_*/*
 
 # 3. Наконец-то разрешаем саму папку models и её содержимое!
-!data/processed/2000_2026_1d/fold_*/models/
+!data/processed/2000_2026_1d_60_10/fold_*/models/
 
 # (Опционально) Разрешаем папку чемпионов и метаданные окружения
-!data/processed/2000_2026_1d/rl_env/
-data/processed/2000_2026_1d/rl_env/*
-!data/processed/2000_2026_1d/rl_env/champions/
-!data/processed/2000_2026_1d/rl_env/env_metadata.json
+!data/processed/2000_2026_1d_60_10/rl_env/
+data/processed/2000_2026_1d_60_10/rl_env/*
+!data/processed/2000_2026_1d_60_10/rl_env/champions/
+!data/processed/2000_2026_1d_60_10/rl_env/env_metadata.json
 
 # Все результаты, логи, графики и модели
 *.log

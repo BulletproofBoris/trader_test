@@ -88,7 +88,7 @@ def main():
     df_combined['datetime'] = pd.to_datetime(df_combined['datetime'])
     df_combined = clean_and_adjust_data(df_combined.sort_values(['datetime', 'ticker']))
 
-    dataset_name = f"{df_combined['datetime'].min().year}_{df_combined['datetime'].max().year}_{args.timeframe}"
+    dataset_name = f"{df_combined['datetime'].min().year}_{df_combined['datetime'].max().year}_{args.timeframe}_{args.lookback}_{args.horizon}"
     DATASET_DIR = PROCESSED_BASE / dataset_name
     os.makedirs(DATASET_DIR, exist_ok=True)
     
