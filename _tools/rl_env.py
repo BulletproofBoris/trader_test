@@ -26,12 +26,9 @@ class TradingEnv(gym.Env):
         else:
             base_df = df.copy() 
             
-        # --- ГРУППИРОВКА ПО ТИКЕРАМ (ФИКС ТЕЛЕПОРТАЦИИ) ---
-        # Предполагаем, что колонка с названием актива называется 'ticker'
-        # Если она называется иначе (например, 'symbol'), поменяй название ниже
+        # --- ГРУППИРОВКА ПО ТИКЕРАМ ---
         self.grouped_data = {}
         for ticker, group in base_df.groupby('ticker'):
-            # Берем только те тикеры, у которых хватает истории для эпизода
             if len(group) > env_config.get("max_episode_steps", 252):
                 self.grouped_data[ticker] = group.sort_values('datetime').reset_index(drop=True)
                 
@@ -47,33 +44,31 @@ class TradingEnv(gym.Env):
         self.action_space = spaces.Discrete(3)
         self.exclude_cols = ['datetime', 'ticker', 'open', 'high', 'low', 'close_x', 'close_y', 'volume']
         
-        # Для определения размерности берем любой случайный тикер
         sample_df = self.grouped_data[self.tickers[0]]
         self.feature_cols = [col for col in sample_df.columns if col not in self.exclude_cols]
         
-        self.obs_shape = len(self.feature_cols) + 1 
+        # Размерность: Фичи + Текущая позиция (-1,0,1) + Unrealized PnL %
+        self.obs_shape = len(self.feature_cols) + 2 
         self.observation_space = spaces.Box(
             low=-np.inf, high=np.inf, shape=(self.obs_shape,), dtype=np.float32
         )
         
-        # Переменные, которые будут заполняться в reset()
         self.df = None
         self.prices = None
         self.features = None
         self.total_steps = 0
         
-        # Переменные состояния
         self.current_step = 0
         self.episode_step = 0
         self.balance = self.initial_balance
         self.prev_balance = self.initial_balance 
         self.current_position = 0 
         self.current_ticker = None
+        self.entry_price = 0.0 # Цена входа в позицию
         
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         
-        # 1. ВЫБИРАЕМ СЛУЧАЙНЫЙ ТИКЕР НА ЭТОТ ЭПИЗОД
         self.current_ticker = self.np_random.choice(self.tickers)
         self.df = self.grouped_data[self.current_ticker]
         
@@ -81,7 +76,6 @@ class TradingEnv(gym.Env):
         self.features = self.df[self.feature_cols].values.astype(np.float32)
         self.total_steps = len(self.prices) - 1
         
-        # 2. Выбираем случайную стартовую точку внутри этого тикера
         max_start = max(0, self.total_steps - self.max_episode_steps - 1)
         self.current_step = self.np_random.integers(0, max_start) if max_start > 0 else 0
         
@@ -89,12 +83,21 @@ class TradingEnv(gym.Env):
         self.balance = self.initial_balance
         self.prev_balance = self.initial_balance
         self.current_position = 0
+        self.entry_price = 0.0
         
         return self._get_observation(), {}
 
     def _get_observation(self):
         feats = self.features[self.current_step]
-        obs = np.append(feats, [self.current_position])
+        
+        # Считаем нереализованную прибыль/убыток в процентах
+        unrealized_pnl = 0.0
+        if self.current_position != 0 and self.entry_price > 0:
+            current_price = self.prices[self.current_step]
+            price_change = (current_price - self.entry_price) / self.entry_price
+            unrealized_pnl = price_change * self.current_position * 100.0 # В процентах
+            
+        obs = np.append(feats, [self.current_position, unrealized_pnl])
         return obs.astype(np.float32)
 
     def step(self, action):
@@ -103,20 +106,28 @@ class TradingEnv(gym.Env):
         
         desired_position = action - 1 
         
+        # 1. Считаем PnL от удержания позиции
         if self.current_position != 0:
             daily_return = (current_price - prev_price) / prev_price
             daily_pnl_pct = daily_return * self.current_position
             self.balance *= (1 + daily_pnl_pct)
             
+        # 2. Обработка изменения позиции (Комиссии и Цена входа)
         if desired_position != self.current_position:
             commission_cost = self.commission * abs(desired_position - self.current_position)
             self.balance *= (1 - commission_cost)
             self.current_position = desired_position
+            
+            if desired_position != 0:
+                self.entry_price = current_price # Запоминаем цену новой позиции
+            else:
+                self.entry_price = 0.0 # Сброс при выходе в кэш
 
+        # 3. Награда агента
         step_reward = ((self.balance - self.prev_balance) / self.prev_balance) * 100
         
         if self.current_position == 0:
-            step_reward -= 0.01
+            step_reward -= 0.01 # Легкий штраф за бездействие
             
         self.prev_balance = self.balance
         self.current_step += 1
@@ -125,11 +136,16 @@ class TradingEnv(gym.Env):
         terminated = False
         truncated = bool(self.episode_step >= self.max_episode_steps)
         
+        # Защита от слива депозита (Margin Call)
         if self.balance < self.initial_balance * 0.1: 
             terminated = True
             step_reward -= 10.0 
             
         obs = self._get_observation()
-        info = {"balance": self.balance, "ticker": self.current_ticker}
+        info = {
+            "balance": self.balance, 
+            "ticker": self.current_ticker,
+            "position": self.current_position
+        }
         
         return obs, step_reward, terminated, truncated, info
