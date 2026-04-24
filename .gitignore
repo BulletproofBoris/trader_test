@@ -32,29 +32,22 @@ data/processed/2000_2026_1d_60_10/*
 !data/processed/2000_2026_1d_60_10/fold_*/
 data/processed/2000_2026_1d_60_10/fold_*/*
 
-# 3. Наконец-то разрешаем саму папку models и её содержимое!
-!data/processed/2000_2026_1d_60_10/fold_*/models/
-
-# (Опционально) Разрешаем папку чемпионов и метаданные окружения
-!data/processed/2000_2026_1d_60_10/rl_env/
-data/processed/2000_2026_1d_60_10/rl_env/*
-!data/processed/2000_2026_1d_60_10/rl_env/champions/
-!data/processed/2000_2026_1d_60_10/rl_env/env_metadata.json
-
 !data/processed/2000_2026_1d_30_5/
 data/processed/2000_2026_1d_30_5/*
 
 !data/processed/2000_2026_1d_30_5/fold_*/
 data/processed/2000_2026_1d_30_5/fold_*/*
 
-# 3. Наконец-то разрешаем саму папку models и её содержимое!
-!data/processed/2000_2026_1d_30_5/fold_*/models/
+!data/processed/2000_2026_1d_18_3/
+data/processed/2000_2026_1d_18_3/*
 
-# (Опционально) Разрешаем папку чемпионов и метаданные окружения
-!data/processed/2000_2026_1d_30_5/rl_env/
-data/processed/2000_2026_1d_30_5/rl_env/*
-!data/processed/2000_2026_1d_30_5/rl_env/champions/
-!data/processed/2000_2026_1d_30_5/rl_env/env_metadata.json
+!data/processed/2000_2026_1d_18_3/fold_*/
+data/processed/2000_2026_1d_18_3/fold_*/*
+
+# 3. Наконец-то разрешаем саму папку models и её содержимое!
+!data/processed/2000_2026_1d_60_10/fold_*/models/
+!data/processed/2000_2026_1d_30_5/fold_*/models/
+!data/processed/2000_2026_1d_18_3/fold_*/models/
 
 # Все результаты, логи, графики и модели
 *.log
