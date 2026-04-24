@@ -142,11 +142,10 @@ def create_model(seq_len, n_features, l2_reg=1e-5):
     x = Add()([res_x, attn_out])
     x = LayerNormalization()(x)
     
-    # 5. ДВОЙНОЙ ПУЛИНГ (Секретное оружие для Time-Series)
-    # Собираем и общую картину (тренд), и экстремальные выбросы (шпильки/объемы)
+    # 5. ДВОЙНОЙ ПУЛИНГ
     avg_pool = GlobalAveragePooling1D()(x)
     max_pool = GlobalMaxPooling1D()(x)
-    x = Concatenate()([avg_pool, max_pool]) # Склеиваем векторы
+    x = Concatenate()([avg_pool, max_pool])
     
     # 6. Финальный полносвязный слой с современной активацией GELU
     x = Dense(64, kernel_regularizer=regularizers.l2(l2_reg))(x)
@@ -158,8 +157,8 @@ def create_model(seq_len, n_features, l2_reg=1e-5):
     
     return Model(inputs=inputs, outputs=outputs)
 
-def save_record_model(model, history, acc, loss, train_time, run, args, seq_len, models_dir):
-    # Добавляем timestamp (время), чтобы файлы при --append не перезаписывали друг друга при совпадении номера run
+# ОБНОВЛЕННАЯ ФУНКЦИЯ СОХРАНЕНИЯ С НОВЫМ ФОРМАТОМ
+def save_record_model(model, history, acc, loss, train_time, run, args, seq_len, n_features, models_dir):
     timestamp = int(time.time())
     model_filename = f"trading_bot_best_acc_{acc*100:.2f}_run{run}_{timestamp}.keras"
     model_filepath = models_dir / model_filename
@@ -168,21 +167,37 @@ def save_record_model(model, history, acc, loss, train_time, run, args, seq_len,
     meta_filepath = models_dir / f"trading_bot_best_acc_{acc*100:.2f}_run{run}_{timestamp}_meta.json"
     clean_history = {k: [float(val) for val in v] for k, v in history.history.items()} if history else {}
     
+    # Автоматически вычисляем горизонт из названия датасета (например: 2000_2026_1d_60_10)
+    dataset_name = Path(args.dataset_dir).name
+    parts = dataset_name.split('_')
+    horizon = int(parts[-1]) if len(parts) >= 2 and parts[-1].isdigit() else "unknown"
+    
     report = {
-        "fold": args.fold,
+        "model_name": model_filename,
         "run_id": str(run),
-        "timestamp": timestamp,
-        "best_val_accuracy": float(acc),
-        "val_loss": float(loss),
-        "training_time_seconds": float(train_time),
-        "hyperparameters": {
-            "lookback_window": seq_len,
-            "batch_size": args.batch_size,
-            "max_epochs": args.epochs,
-            "start_lr": args.lr,
-            "l2_reg": args.l2_reg
+        "dataset": dataset_name,
+        "fold": args.fold,
+        "config": {
+            "lookback": seq_len,
+            "horizon": horizon,
+            "features_count": n_features,
+            "architecture": "BiGRU + Attention" 
         },
-        "training_history": clean_history
+        "metrics": {
+            "val_loss": float(loss),
+            "val_acc": float(acc * 100)
+        },
+        "training_stats": {
+            "timestamp": timestamp,
+            "training_time_seconds": float(train_time),
+            "hyperparameters": {
+                "batch_size": args.batch_size,
+                "max_epochs": args.epochs,
+                "start_lr": args.lr,
+                "l2_reg": args.l2_reg
+            },
+            "training_history": clean_history
+        }
     }
     
     with open(meta_filepath, "w", encoding="utf-8") as f:
@@ -287,7 +302,8 @@ def main(args):
 
         if acc > global_best_acc:
             global_best_acc = acc
-            save_record_model(model, history, acc, loss, train_time, run, args, seq_len, MODELS_DIR)
+            # ОБНОВЛЕННЫЙ ВЫЗОВ (Передаем n_features)
+            save_record_model(model, history, acc, loss, train_time, run, args, seq_len, n_features, MODELS_DIR)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

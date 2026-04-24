@@ -1,95 +1,135 @@
-import os
-import json
+import sys
+import re
+import shutil
+import argparse
 from pathlib import Path
 
-# Настройки
-BASE_DIR = Path("data/processed")
-MODELS_TO_KEEP = 3  # Сколько лучших моделей оставить в каждом фолде
-METRIC_TO_SORT = "val_loss"  # Главный критерий отбора
-REVERSE_SORT = False # False для loss (ищем минимум), True если бы сортировали по accuracy
+def main():
+    parser = argparse.ArgumentParser(description="Глобальная очистка мусорных и временных файлов моделей")
+    parser.add_argument("--base_dir", type=str, default="data/processed", help="Путь к базовой папке со всеми датасетами")
+    parser.add_argument("--keep", type=int, default=3, help="Сколько лучших моделей оставить в каждом фолде")
+    
+    args = parser.parse_args()
+    base_dir = Path(args.base_dir)
+    
+    if not base_dir.exists():
+        print(f"❌ Ошибка: Базовая директория {base_dir} не найдена!")
+        sys.exit(1)
 
-def clean_models():
-    print(f"🧹 Запуск универсальной уборки моделей (Оставляем Топ-{MODELS_TO_KEEP} по {METRIC_TO_SORT})...")
+    print(f"🧹 Запуск ГЛОБАЛЬНОЙ уборки моделей в: {base_dir} (Оставляем Топ-{args.keep})...")
     
-    if not BASE_DIR.exists():
-        print(f"❌ Базовая директория {BASE_DIR} не найдена!")
-        return
+    model_pattern = re.compile(r"loss_([0-9]+\.[0-9]+).*?\.keras")
 
-    # Рекурсивно ищем все папки fold_* внутри data/processed
-    folds = sorted([d for d in BASE_DIR.rglob("fold_*") if d.is_dir()])
+    dataset_dirs = sorted([d for d in base_dir.iterdir() if d.is_dir()])
     
-    total_deleted = 0
-    total_saved = 0
-    folds_processed = 0
-    
-    for fold_dir in folds:
-        models_dir = fold_dir / "models"
-        if not models_dir.exists():
+    if not dataset_dirs:
+        print(f"⚠️ В папке {base_dir} не найдено датасетов.")
+        sys.exit(0)
+
+    grand_total_models_deleted = 0
+    grand_total_temp_deleted = 0
+
+    for dataset_dir in dataset_dirs:
+        print("\n" + "#"*80)
+        print(f"🚀 ОБРАБОТКА ДАТАСЕТА: {dataset_dir.name}")
+        print("#"*80)
+
+        folds = sorted([d for d in dataset_dir.glob("fold_*") if d.is_dir()])
+        
+        if not folds:
+            print(f"   ⚠️ Фолдов не найдено, пропускаем...")
             continue
-            
-        # dataset_name поможет нам понимать, в какой именно песочнице мы сейчас убираемся
-        dataset_name = fold_dir.parent.name
-        print(f"\n📂 [{dataset_name}] Проверка фолда: {fold_dir.name}")
-        
-        # Собираем все мета-файлы
-        meta_files = list(models_dir.glob("*_meta.json"))
-        models_data = []
-        
-        for meta_file in meta_files:
-            try:
-                with open(meta_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    
-                keras_filename = meta_file.name.replace("_meta.json", ".keras")
-                keras_file = models_dir / keras_filename
-                
-                if keras_file.exists():
-                    models_data.append({
-                        "meta_path": meta_file,
-                        "keras_path": keras_file,
-                        "val_loss": data.get("val_loss", float('inf')),
-                        "accuracy": data.get("best_val_accuracy", 0.0),
-                        "run_id": data.get("run_id", "unknown")
-                    })
-            except Exception as e:
-                print(f"  ⚠️ Ошибка чтения {meta_file.name}: {e}")
-                
-        if not models_data:
-            print("  Пусто. Нет пар (.keras + .json).")
-            continue
-            
-        folds_processed += 1
-        
-        # Сортируем модели
-        models_data.sort(key=lambda x: x[METRIC_TO_SORT], reverse=REVERSE_SORT)
-        
-        # Определяем, кого оставляем, а кого удаляем
-        keepers = models_data[:MODELS_TO_KEEP]
-        trash = models_data[MODELS_TO_KEEP:]
-        
-        print(f"  🏆 Оставляем:")
-        for i, m in enumerate(keepers):
-            print(f"     {i+1}. Run {m['run_id']} | Loss: {m['val_loss']:.4f} | Acc: {m['accuracy']*100:.2f}%")
-            total_saved += 1
-            
-        if trash:
-            print(f"  🗑️  Удаляем {len(trash)} файлов...")
-            for m in trash:
-                try:
-                    m['keras_path'].unlink()
-                    m['meta_path'].unlink()
-                    total_deleted += 1
-                except Exception as e:
-                    print(f"     ❌ Ошибка удаления {m['keras_path'].name}: {e}")
-        else:
-            print("  ✨ Удалять нечего, количество моделей в норме.")
 
-    print("\n" + "="*50)
-    print(f"🏁 Уборка завершена!")
-    print(f"Обработано фолдов:         {folds_processed}")
-    print(f"Сохранено элитных моделей: {total_saved}")
-    print(f"Удалено мусорных моделей:  {total_deleted} (освобождено место на диске)")
-    print("="*50)
+        dataset_models_deleted = 0
+        dataset_temp_deleted = 0
+
+        for fold_dir in folds:
+            models_dir = fold_dir / "models"
+            if not models_dir.exists():
+                continue
+
+            print(f"\n📂 Проверка: {fold_dir.name}")
+            
+            temp_files_found = []
+            
+            # 1. ТОЧЕЧНЫЙ ПОИСК ВРЕМЕННЫХ ФАЙЛОВ И МУСОРА (БЕЗ УДАЛЕНИЯ МЕТАДАННЫХ)
+            for file_path in models_dir.iterdir():
+                is_trash = False
+                
+                if file_path.is_file():
+                    name = file_path.name
+                    # Удаляем только явно известный системный мусор и сырые веса
+                    if name.startswith("temp_"):
+                        is_trash = True
+                    elif name.endswith(".h5") or name.endswith(".weights.h5"):
+                        is_trash = True
+                    elif file_path.suffix in [".tmp", ".temp", ".part", ".index", ".data-00000-of-00001"]:
+                        is_trash = True
+                    elif name == "checkpoint":
+                        is_trash = True
+                
+                # Ищем папки-призраки вида run.keras.tmp
+                elif file_path.is_dir() and file_path.name.endswith(".tmp"):
+                    is_trash = True
+                
+                if is_trash:
+                    temp_files_found.append(file_path)
+
+            if temp_files_found:
+                for tf_path in temp_files_found:
+                    try:
+                        if tf_path.is_file():
+                            tf_path.unlink()
+                        else:
+                            shutil.rmtree(tf_path)
+                        dataset_temp_deleted += 1
+                        grand_total_temp_deleted += 1
+                    except Exception as e:
+                        print(f"   ⚠️ Ошибка удаления временного файла {tf_path.name}: {e}")
+                print(f"   🧹 Удалено временных файлов/чекпоинтов: {len(temp_files_found)}")
+
+            # 2. ФИЛЬТРАЦИЯ И УДАЛЕНИЕ ХУДШИХ .keras МОДЕЛЕЙ
+            keras_files = list(models_dir.glob("*.keras"))
+            valid_models = []
+
+            for m_file in keras_files:
+                match = model_pattern.search(m_file.name)
+                if match:
+                    loss = float(match.group(1))
+                    valid_models.append({"path": m_file, "loss": loss})
+
+            valid_models.sort(key=lambda x: x["loss"])
+
+            if not valid_models:
+                print("   ⚠️ Целых моделей .keras не найдено.")
+                continue
+
+            elites = valid_models[:args.keep]
+            trash = valid_models[args.keep:]
+
+            print("   🏆 Оставляем:")
+            for i, elite in enumerate(elites, 1):
+                print(f"      {i}. {elite['path'].name}")
+
+            if trash:
+                for bad_model in trash:
+                    try:
+                        bad_model["path"].unlink()
+                        dataset_models_deleted += 1
+                        grand_total_models_deleted += 1
+                    except Exception as e:
+                        print(f"   ⚠️ Ошибка удаления {bad_model['path'].name}: {e}")
+                print(f"   🗑️  Удаляем {len(trash)} файлов...")
+            else:
+                print("   ✨ Удалять нечего, количество моделей в норме.")
+
+        print(f"\n📊 Итоги по датасету {dataset_dir.name}: удалено {dataset_models_deleted} моделей, {dataset_temp_deleted} временных файлов.")
+
+    print("\n" + "="*80)
+    print("🏁 ГЛОБАЛЬНАЯ УБОРКА ПОЛНОСТЬЮ ЗАВЕРШЕНА!")
+    print(f"Всего удалено мусорных моделей:  {grand_total_models_deleted}")
+    print(f"Всего удалено временных файлов:  {grand_total_temp_deleted}")
+    print("="*80)
 
 if __name__ == "__main__":
-    clean_models()
+    main()
