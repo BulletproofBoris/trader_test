@@ -1,134 +1,139 @@
 import sys
-import re
+import json
 import shutil
 import argparse
 from pathlib import Path
 
 def main():
-    parser = argparse.ArgumentParser(description="Глобальная очистка мусорных и временных файлов моделей")
-    parser.add_argument("--base_dir", type=str, default="data/processed", help="Путь к базовой папке со всеми датасетами")
-    parser.add_argument("--keep", type=int, default=3, help="Сколько лучших моделей оставить в каждом фолде")
-    
+    parser = argparse.ArgumentParser(description="Глобальная очистка моделей с подробным отчетом")
+    parser.add_argument("--base_dir", type=str, default="data/processed", help="Путь к базовой папке")
+    parser.add_argument("--keep", type=int, default=3, help="Сколько лучших моделей оставить")
     args = parser.parse_args()
-    base_dir = Path(args.base_dir)
     
+    base_dir = Path(args.base_dir)
     if not base_dir.exists():
-        print(f"❌ Ошибка: Базовая директория {base_dir} не найдена!")
+        print(f"❌ Ошибка: {base_dir} не найдена!")
         sys.exit(1)
 
-    print(f"🧹 Запуск ГЛОБАЛЬНОЙ уборки моделей в: {base_dir} (Оставляем Топ-{args.keep})...")
+    print(f"🧹 Запуск ГЛОБАЛЬНОЙ уборки в: {base_dir} (Оставляем Топ-{args.keep} по val_loss)...")
     
-    model_pattern = re.compile(r"loss_([0-9]+\.[0-9]+).*?\.keras")
-
     dataset_dirs = sorted([d for d in base_dir.iterdir() if d.is_dir()])
     
-    if not dataset_dirs:
-        print(f"⚠️ В папке {base_dir} не найдено датасетов.")
-        sys.exit(0)
-
-    grand_total_models_deleted = 0
-    grand_total_temp_deleted = 0
+    grand_total_deleted = 0
+    grand_total_temp = 0
+    grand_total_kept = 0
 
     for dataset_dir in dataset_dirs:
-        print("\n" + "#"*80)
-        print(f"🚀 ОБРАБОТКА ДАТАСЕТА: {dataset_dir.name}")
-        print("#"*80)
-
         folds = sorted([d for d in dataset_dir.glob("fold_*") if d.is_dir()])
-        
-        if not folds:
-            print(f"   ⚠️ Фолдов не найдено, пропускаем...")
-            continue
+        if not folds: continue
 
-        dataset_models_deleted = 0
-        dataset_temp_deleted = 0
+        print("\n" + "#"*80)
+        print(f"🚀 ДАТАСЕТ: {dataset_dir.name}")
+        print("#"*80)
 
         for fold_dir in folds:
             models_dir = fold_dir / "models"
-            if not models_dir.exists():
-                continue
+            if not models_dir.exists(): continue
 
-            print(f"\n📂 Проверка: {fold_dir.name}")
+            print(f"\n📂 Фолд: {fold_dir.name}")
             
-            temp_files_found = []
-            
-            # 1. ТОЧЕЧНЫЙ ПОИСК ВРЕМЕННЫХ ФАЙЛОВ И МУСОРА (БЕЗ УДАЛЕНИЯ МЕТАДАННЫХ)
-            for file_path in models_dir.iterdir():
+            # 1. ЖЕСТКАЯ ОЧИСТКА ВРЕМЕННОГО МУСОРА
+            temp_files = []
+            for f in models_dir.iterdir():
                 is_trash = False
-                
-                if file_path.is_file():
-                    name = file_path.name
-                    # Удаляем только явно известный системный мусор и сырые веса
-                    if name.startswith("temp_"):
+                name = f.name
+                if f.is_file():
+                    if name.startswith("temp_") or name.endswith(".h5") or name.endswith(".weights.h5"):
                         is_trash = True
-                    elif name.endswith(".h5") or name.endswith(".weights.h5"):
-                        is_trash = True
-                    elif file_path.suffix in [".tmp", ".temp", ".part", ".index", ".data-00000-of-00001"]:
+                    elif f.suffix in [".tmp", ".temp", ".part", ".index", ".data-00000-of-00001"]:
                         is_trash = True
                     elif name == "checkpoint":
                         is_trash = True
-                
-                # Ищем папки-призраки вида run.keras.tmp
-                elif file_path.is_dir() and file_path.name.endswith(".tmp"):
+                elif f.is_dir() and name.endswith(".tmp"):
                     is_trash = True
                 
                 if is_trash:
-                    temp_files_found.append(file_path)
+                    temp_files.append(f)
 
-            if temp_files_found:
-                for tf_path in temp_files_found:
-                    try:
-                        if tf_path.is_file():
-                            tf_path.unlink()
-                        else:
-                            shutil.rmtree(tf_path)
-                        dataset_temp_deleted += 1
-                        grand_total_temp_deleted += 1
-                    except Exception as e:
-                        print(f"   ⚠️ Ошибка удаления временного файла {tf_path.name}: {e}")
-                print(f"   🧹 Удалено временных файлов/чекпоинтов: {len(temp_files_found)}")
+            for tf_path in temp_files:
+                try:
+                    if tf_path.is_file(): tf_path.unlink()
+                    else: shutil.rmtree(tf_path)
+                    grand_total_temp += 1
+                except Exception: pass
+            
+            if temp_files:
+                print(f"   🧹 Удалено системного мусора: {len(temp_files)} файлов")
 
-            # 2. ФИЛЬТРАЦИЯ И УДАЛЕНИЕ ХУДШИХ .keras МОДЕЛЕЙ
+            # 2. АНАЛИЗ И ФИЛЬТРАЦИЯ МОДЕЛЕЙ (ЧЕРЕЗ JSON)
             keras_files = list(models_dir.glob("*.keras"))
             valid_models = []
 
             for m_file in keras_files:
-                match = model_pattern.search(m_file.name)
-                if match:
-                    loss = float(match.group(1))
-                    valid_models.append({"path": m_file, "loss": loss})
+                if m_file in temp_files: continue
+                
+                json_file = m_file.with_suffix(".json")
+                val_loss = float('inf')
+                val_acc = 0.0
+                run_id = "?"
+                
+                # Читаем характеристики из JSON
+                if json_file.exists():
+                    try:
+                        with open(json_file, 'r') as jf:
+                            meta = json.load(jf)
+                            # Аккуратно достаем метрики, если они есть
+                            v_loss = meta.get("metrics", {}).get("val_loss")
+                            val_loss = float(v_loss) if v_loss is not None else float('inf')
+                            v_acc = meta.get("metrics", {}).get("val_acc")
+                            val_acc = float(v_acc) if v_acc is not None else 0.0
+                            run_id = meta.get("run_id", "?")
+                    except Exception:
+                        pass
+                
+                valid_models.append({
+                    "path": m_file, 
+                    "json": json_file,
+                    "loss": val_loss,
+                    "acc": val_acc,
+                    "run": run_id
+                })
 
+            # Сортируем по Loss (от лучшего к худшему)
             valid_models.sort(key=lambda x: x["loss"])
-
-            if not valid_models:
-                print("   ⚠️ Целых моделей .keras не найдено.")
-                continue
 
             elites = valid_models[:args.keep]
             trash = valid_models[args.keep:]
 
-            print("   🏆 Оставляем:")
-            for i, elite in enumerate(elites, 1):
-                print(f"      {i}. {elite['path'].name}")
-
+            # Удаляем слабые модели И их JSON-паспорта
             if trash:
-                for bad_model in trash:
+                for bad in trash:
                     try:
-                        bad_model["path"].unlink()
-                        dataset_models_deleted += 1
-                        grand_total_models_deleted += 1
-                    except Exception as e:
-                        print(f"   ⚠️ Ошибка удаления {bad_model['path'].name}: {e}")
-                print(f"   🗑️  Удаляем {len(trash)} файлов...")
+                        bad["path"].unlink()
+                        if bad["json"].exists(): bad["json"].unlink()
+                        grand_total_deleted += 1
+                    except Exception: pass
+                print(f"   🗑️  Списано слабых моделей: {len(trash)}")
+
+            # Выводим оставшиеся (Элиту)
+            if elites:
+                print("   💎 Оставшиеся в строю (Топ по Loss):")
+                for i, elite in enumerate(elites, 1):
+                    loss_str = f"{elite['loss']:.4f}" if elite['loss'] != float('inf') else "N/A"
+                    acc_str = f"{elite['acc']:.2f}%"
+                    run_str = f"Run {elite['run']:>2}"
+                    print(f"      {i}. {run_str} | Loss: {loss_str} | Acc: {acc_str} | Файл: {elite['path'].name}")
+                grand_total_kept += len(elites)
             else:
-                print("   ✨ Удалять нечего, количество моделей в норме.")
+                print("   ⚠️ Моделей не найдено.")
 
-        print(f"\n📊 Итоги по датасету {dataset_dir.name}: удалено {dataset_models_deleted} моделей, {dataset_temp_deleted} временных файлов.")
-
+    # 3. ФИНАЛЬНЫЙ СВОДНЫЙ ОТЧЕТ
     print("\n" + "="*80)
-    print("🏁 ГЛОБАЛЬНАЯ УБОРКА ПОЛНОСТЬЮ ЗАВЕРШЕНА!")
-    print(f"Всего удалено мусорных моделей:  {grand_total_models_deleted}")
-    print(f"Всего удалено временных файлов:  {grand_total_temp_deleted}")
+    print("🏁 ИТОГОВЫЙ ОТЧЕТ ПО ФАБРИКЕ НЕЙРОСЕТЕЙ")
+    print("="*80)
+    print(f"🟢 Всего 'элитных' моделей готово к бою: {grand_total_kept}")
+    print(f"🔴 Всего удалено слабых моделей:         {grand_total_deleted}")
+    print(f"🧹 Всего очищено временных файлов:       {grand_total_temp}")
     print("="*80)
 
 if __name__ == "__main__":

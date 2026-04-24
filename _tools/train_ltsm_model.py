@@ -164,7 +164,7 @@ def save_record_model(model, history, acc, loss, train_time, run, args, seq_len,
     model_filepath = models_dir / model_filename
     model.save(model_filepath)
     
-    meta_filepath = models_dir / f"trading_bot_best_acc_{acc*100:.2f}_run{run}_{timestamp}_meta.json"
+    meta_filepath = models_dir / f"trading_bot_best_acc_{acc*100:.2f}_run{run}_{timestamp}.json"
     clean_history = {k: [float(val) for val in v] for k, v in history.history.items()} if history else {}
     
     # Автоматически вычисляем горизонт из названия датасета (например: 2000_2026_1d_60_10)
