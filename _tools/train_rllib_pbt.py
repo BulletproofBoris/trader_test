@@ -6,9 +6,8 @@ from pathlib import Path
 import logging
 import warnings
 import sys
-import shutil # Нужен для удаления папок
+import shutil
 
-# Глушим системный спам
 os.environ["RAY_DEDUP_LOGS"] = "0"
 os.environ["TUNE_DISABLE_AUTO_CALLBACK_LOGGERS"] = "1"
 warnings.filterwarnings("ignore")
@@ -20,14 +19,12 @@ from ray.rllib.algorithms.ppo import PPOConfig
 from ray.tune.registry import register_env
 from ray.tune import CLIReporter
 
-# Импортируем нашу среду
 from _tools.rl_env import TradingEnv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 RL_DIR = BASE_DIR / "data" / "processed" / "2000_2026_1d" / "rl_env"
 STATS_FILE = RL_DIR / "training_summary.txt"
 
-# --- CALLBACK ДЛЯ ЗАПИСИ СВОИХ ЛОГОВ В ФАЙЛ ---
 class TradingStatsCallback(tune.Callback):
     def on_trial_result(self, iteration, trials, trial, result, **info):
         lines = []
@@ -39,7 +36,7 @@ class TradingStatsCallback(tune.Callback):
 
         for t in trials:
             m = t.last_result
-            if not m: # Защита от пустых результатов на старте
+            if not m:
                 continue
                 
             train_ret = m.get('env_runners', {}).get('episode_return_mean', 0)
@@ -61,9 +58,9 @@ register_env("TradingEnv-v0", env_creator)
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--iterations', type=int, default=100)
+    # Увеличиваем дефолтное количество итераций, чтобы PBT успел поработать
+    parser.add_argument('--iterations', type=int, default=500) 
     parser.add_argument('--population', type=int, default=4)
-    # --- ДОБАВЛЯЕМ НОВЫЙ АРГУМЕНТ ---
     parser.add_argument('--force', action='store_true', help='Принудительно начать обучение с нуля, удалив старые модели')
     args = parser.parse_args()
 
@@ -71,7 +68,6 @@ def main():
     EXPERIMENT_NAME = "pbt_trading_bot"
     EXPERIMENT_DIR = RL_DIR / "ray_results" / EXPERIMENT_NAME
     
-    # --- ЛОГИКА ПРИНУДИТЕЛЬНОГО ПЕРЕОБУЧЕНИЯ ---
     if args.force:
         if EXPERIMENT_DIR.exists():
             print(f"⚠️ Флаг --force обнаружен. Удаляем старые результаты из {EXPERIMENT_DIR}...")
@@ -100,22 +96,25 @@ def main():
         .debugging(log_level="ERROR") 
         .training(
             lr=1e-4,
-            train_batch_size=1024,
+            train_batch_size=4096, # Увеличили батч для стабильности градиентов
             model={"fcnet_hiddens": [256, 256], "fcnet_activation": "relu"}
         )
         .env_runners(num_env_runners=1)
         .evaluation(
-            evaluation_interval=2, 
-            evaluation_duration=3, 
+            # Теперь эвалюация будет запускаться чуть реже, чтобы экономить время
+            evaluation_interval=10, 
+            evaluation_duration=5, 
             evaluation_config={"env_config": {"split_mode": "test"}, "explore": False}
         )
     )
 
     pbt = PopulationBasedTraining(
         time_attr="training_iteration",
-        perturbation_interval=5,
+        perturbation_interval=30, # Твой "испытательный срок". 30-50 тут в самый раз!
         resample_probability=0.25,
-        hyperparam_mutations={"lr": tune.loguniform(1e-5, 1e-3)}
+        hyperparam_mutations={
+            "lr": tune.loguniform(5e-6, 5e-4) # Чуть сузили поиск, чтобы не ломать агента слишком большим шагом
+        }
     )
 
     reporter = CLIReporter(
@@ -124,9 +123,6 @@ def main():
         print_intermediate_tables=False
     )
 
-    # --- ЛОГИКА ВОССТАНОВЛЕНИЯ ИЛИ НОВОГО СТАРТА ---
-    # Если папка существует и мы НЕ передали --force, Ray попытается продолжить
-    # Если папки нет (мы ее удалили выше), он создаст новый
     tuner = tune.Tuner(
         "PPO",
         tune_config=tune.TuneConfig(
@@ -146,15 +142,11 @@ def main():
         )
     )
     
-    # Если мы не используем --force, нужно проверить, не закончено ли уже обучение
-    # Иначе Tuner попытается продолжить и вылетит с ошибкой "Tuner is already done"
     can_fit = True
     if not args.force and tune.Tuner.can_restore(str(EXPERIMENT_DIR)):
         try:
             print("🔄 Попытка восстановить предыдущую сессию обучения...")
             tuner = tune.Tuner.restore(str(EXPERIMENT_DIR), trainable="PPO", resume_errored=True)
-            # Устанавливаем новый лимит итераций, если пользователь передал большее число
-            # Это обходной путь для Ray 2.x, так как run_config.stop жестко запекается
         except Exception as e:
             print(f"⚠️ Не удалось восстановить сессию: {e}. Возможно, она уже завершена.")
             can_fit = False
