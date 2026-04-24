@@ -7,176 +7,180 @@ import tensorflow as tf
 from pathlib import Path
 from sklearn.metrics import f1_score
 
-# Отключаем системный спам TF
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 tf.keras.mixed_precision.set_global_policy('mixed_float16')
 
-def create_sequences(df, feature_cols, lookback=60):
-    """
-    Нарезает датафрейм на окна [lookback, features] для LSTM.
-    Возвращает тензоры, а также списки дат и тикеров для точной склейки.
-    """
+def create_sequences(df, feature_cols, lookback):
     X, y, dates, tickers = [], [], [], []
-    
     for ticker, group in df.groupby('ticker'):
         group = group.sort_values('datetime')
         features = group[feature_cols].values.astype(np.float32)
-        
-        # Сдвигаем метки: -1 (SL) -> 0, 0 (Hold) -> 1, 1 (TP) -> 2
         labels = (group['label'].values + 1).astype(int) 
-        
         dt = group['datetime'].values
         tk = group['ticker'].values
         
         for i in range(len(features) - lookback):
             X.append(features[i : i + lookback])
             y.append(labels[i + lookback - 1])
-            # Привязываем прогноз к последнему дню окна
             dates.append(dt[i + lookback - 1])
             tickers.append(tk[i + lookback - 1])
             
     return np.array(X), np.array(y), np.array(dates), np.array(tickers)
 
 def main():
-    BASE_DIR = Path("data/processed/2000_2026_1d")
+    PROCESSED_DIR = Path("data/processed")
     
-    # Изолированная структура для RL
-    RL_ENV_DIR = BASE_DIR / "rl_env"
+    # Список наших конфигураций-ансамблей
+    CONFIGS = {
+        "c60": "2000_2026_1d_60_10",
+        "c30": "2000_2026_1d_30_5",
+        "c18": "2000_2026_1d_18_3"
+    }
+    
+    # Сохранять результат будем в общую родительскую папку
+    RL_ENV_DIR = PROCESSED_DIR / "2000_2026_1d" / "rl_env"
     CHAMPIONS_DIR = RL_ENV_DIR / "champions"
     OUTPUT_FILE = RL_ENV_DIR / "environment_data.parquet"
     METADATA_FILE = RL_ENV_DIR / "env_metadata.json"
     
-    RL_ENV_DIR.mkdir(parents=True, exist_ok=True)
+    # Очистка и создание папок
+    if CHAMPIONS_DIR.exists():
+        shutil.rmtree(CHAMPIONS_DIR)
     CHAMPIONS_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Читаем глобальные метаданные (чтобы узнать lookback)
-    meta_path = BASE_DIR / "metadata.json"
-    if not meta_path.exists():
-        print(f"❌ Не найден файл {meta_path}. Проверь путь к датасету.")
+    
+    # Узнаем список фолдов (берем из первой конфиги)
+    base_config_dir = PROCESSED_DIR / CONFIGS["c60"]
+    if not base_config_dir.exists():
+        print(f"❌ Ошибка: Не найдена базовая папка {base_config_dir}")
         return
         
-    with open(meta_path, 'r') as f:
-        lookback = json.load(f)["parameters"]["lookback"]
-
-    folds = sorted([d for d in BASE_DIR.glob("fold_*") if d.is_dir()])
+    folds = sorted([d.name for d in base_config_dir.glob("fold_*") if d.is_dir()])
+    
     all_rl_data = []
-    env_metadata = {"champions": {}}
+    env_metadata = {}
 
-    print(f"🚀 Старт сборки RL Environment (Multi-Model F1-Score Casting)")
-    print(f"📁 Целевая папка: {RL_ENV_DIR.absolute()}\n")
+    print(f"🚀 СТАРТ: Сборка Мульти-Таймфрейм Ансамбля (9 нейросетей)")
+    
+    for fold_name in folds:
+        print(f"\n🧩 Собираем консилиум для {fold_name}:")
+        fold_merged_df = None
+        base_features_df = None 
+        env_metadata[fold_name] = {}
 
-    for fold_dir in folds:
-        fold_name = fold_dir.name
-        models_dir = fold_dir / "models"
-        val_parquet = fold_dir / "data" / "val" / "ml_data.parquet"
-        val_csv = fold_dir / "data" / "val" / "dataset.csv"  # <-- Берем сырые данные отсюда!
-        features_json = fold_dir / "artifacts" / "features_selected.json"
-        
-        models = list(models_dir.glob("*.keras"))
-        if not models or not val_parquet.exists() or not val_csv.exists():
-            continue
+        # Проходим по каждой из 3-х конфигураций
+        for conf_prefix, conf_folder in CONFIGS.items():
+            conf_dir = PROCESSED_DIR / conf_folder
+            fold_dir = conf_dir / fold_name
             
-        print(f"🎬 [{fold_name}] Аудит {len(models)} моделей-кандидатов...")
-        
-        with open(features_json, 'r') as f:
-            feature_cols = json.load(f)["feature_order"]
+            print(f"  🔍 Анализ {conf_folder}...")
             
-        val_df = pd.read_parquet(val_parquet)
-        val_df['datetime'] = pd.to_datetime(val_df['datetime'])
-        
-        X_val, y_val, dates_val, tickers_val = create_sequences(val_df, feature_cols, lookback)
-        
-        if len(X_val) == 0:
-            print(f"  ⚠️ Недостаточно данных для формирования окон. Пропуск.")
-            continue
-
-        model_scores = []
-        
-        for model_path in models:
-            tf.keras.backend.clear_session()
-            try:
-                model = tf.keras.models.load_model(model_path, compile=False)
-                probs = model.predict(X_val, batch_size=2048, verbose=0)
-                preds = np.argmax(probs, axis=1)
+            meta_path = conf_dir / "metadata.json"
+            if not meta_path.exists():
+                print(f"    ❌ Пропуск: Нет metadata.json")
+                continue
                 
-                score = f1_score(y_val, preds, average='macro')
-                
-                model_scores.append({
-                    "path": model_path,
-                    "f1": score,
-                    "probs": probs
-                })
-            except Exception as e:
-                print(f"  ❌ Ошибка загрузки {model_path.name}: {e}")
-                
-        model_scores.sort(key=lambda x: x["f1"], reverse=True)
-        top_models = model_scores[:3]
+            with open(meta_path, 'r') as f:
+                lookback = json.load(f)["parameters"]["lookback"]
 
-        if len(top_models) < 3:
-            print("  ⚠️ Найдено менее 3-х успешных моделей. Пропуск фолда.")
-            continue
+            models_dir = fold_dir / "models"
+            val_parquet = fold_dir / "data" / "val" / "ml_data.parquet"
+            features_json = fold_dir / "artifacts" / "features_selected.json"
             
-        env_metadata["champions"][fold_name] = {}
-        
-        preds_dict = {
-            'datetime': pd.to_datetime(dates_val),
-            'ticker': tickers_val
-        }
-        
-        for i, m_info in enumerate(top_models, 1):
-            model_name = m_info['path'].name
-            print(f"  🏆 Чемпион {i}: {model_name} (Macro F1: {m_info['f1']*100:.2f}%)")
+            if not models_dir.exists() or not val_parquet.exists():
+                print(f"    ⚠️ Пропуск: Нет папки models или данных")
+                continue
+                
+            with open(features_json, 'r') as f:
+                feature_cols = json.load(f)["feature_order"]
+                
+            val_df = pd.read_parquet(val_parquet)
+            val_df['datetime'] = pd.to_datetime(val_df['datetime'])
             
-            shutil.copy2(m_info['path'], CHAMPIONS_DIR / f"rank{i}_{model_name}")
+            # Фичи у всех конфигов одинаковые, берем их один раз из c60
+            if base_features_df is None and conf_prefix == "c60":
+                base_features_df = val_df.copy()
             
-            env_metadata["champions"][fold_name][f"rank_{i}"] = {
-                "model_file": model_name,
-                "macro_f1": float(m_info['f1']),
-                "features_used": len(feature_cols)
-            }
-            
-            preds_dict[f'm{i}_p0'] = m_info['probs'][:, 0]
-            preds_dict[f'm{i}_p1'] = m_info['probs'][:, 1]
-            preds_dict[f'm{i}_p2'] = m_info['probs'][:, 2]
+            X_val, y_val, dates_val, tickers_val = create_sequences(val_df, feature_cols, lookback)
+            if len(X_val) == 0: continue
 
-        preds_df = pd.DataFrame(preds_dict)
+            models = list(models_dir.glob("*.keras"))
+            model_scores = []
+            
+            # Прогон всех моделей конфига
+            for model_path in models:
+                tf.keras.backend.clear_session()
+                try:
+                    model = tf.keras.models.load_model(model_path, compile=False)
+                    probs = model.predict(X_val, batch_size=2048, verbose=0)
+                    preds = np.argmax(probs, axis=1)
+                    score = f1_score(y_val, preds, average='macro')
+                    model_scores.append({"path": model_path, "f1": score, "probs": probs})
+                except Exception:
+                    pass
+                    
+            # Берем ТОП-3
+            model_scores.sort(key=lambda x: x["f1"], reverse=True)
+            top_models = model_scores[:3]
+            if not top_models: continue
+                
+            preds_dict = {'datetime': pd.to_datetime(dates_val), 'ticker': tickers_val}
+            env_metadata[fold_name][conf_prefix] = {}
+            
+            # Записываем вероятности и сохраняем чемпионов
+            for i, m_info in enumerate(top_models, 1):
+                model_name = m_info['path'].name
+                new_name = f"{conf_prefix}_rank{i}_{model_name}" # Пример: c60_rank1_model.keras
+                
+                print(f"    🏆 {new_name} (F1: {m_info['f1']*100:.1f}%)")
+                shutil.copy2(m_info['path'], CHAMPIONS_DIR / new_name)
+                
+                env_metadata[fold_name][conf_prefix][f"rank_{i}"] = {"model_file": new_name}
+                
+                # Колонки будут: c60_m1_p0, c18_m3_p2 и т.д.
+                preds_dict[f'{conf_prefix}_m{i}_p0'] = m_info['probs'][:, 0]
+                preds_dict[f'{conf_prefix}_m{i}_p1'] = m_info['probs'][:, 1]
+                preds_dict[f'{conf_prefix}_m{i}_p2'] = m_info['probs'][:, 2]
+
+            # Сливаем (Inner Join) предсказания текущего конфига с остальными
+            preds_df = pd.DataFrame(preds_dict)
+            if fold_merged_df is None:
+                fold_merged_df = preds_df
+            else:
+                fold_merged_df = pd.merge(fold_merged_df, preds_df, on=['datetime', 'ticker'], how='inner')
         
-        # Приклеиваем вероятности к ml_data (фичам)
-        fold_rl_df = pd.merge(val_df, preds_df, on=['datetime', 'ticker'], how='inner')
-        
-        # Подтягиваем сырые OHLCV котировки прямо из папки фолда
-        raw_fold_df = pd.read_csv(val_csv)[['datetime', 'ticker', 'open', 'high', 'low', 'close', 'volume']]
-        raw_fold_df['datetime'] = pd.to_datetime(raw_fold_df['datetime'])
-        
-        # Приклеиваем сырые котировки (Pandas сам добавит суффиксы _x и _y, если есть дубликаты имен)
-        fold_rl_df = pd.merge(fold_rl_df, raw_fold_df, on=['datetime', 'ticker'], how='inner')
-        
-        all_rl_data.append(fold_rl_df)
+        # Если удалось собрать данные хоть с кого-то
+        if fold_merged_df is not None and not fold_merged_df.empty:
+            # 1. Склеиваем с базовыми фичами
+            fold_rl_df = pd.merge(base_features_df, fold_merged_df, on=['datetime', 'ticker'], how='inner')
+            
+            # 2. Подтягиваем сырые OHLCV котировки из папки c60
+            val_csv = PROCESSED_DIR / CONFIGS["c60"] / fold_name / "data" / "val" / "dataset.csv"
+            if val_csv.exists():
+                raw_fold_df = pd.read_csv(val_csv)[['datetime', 'ticker', 'open', 'high', 'low', 'close', 'volume']]
+                raw_fold_df['datetime'] = pd.to_datetime(raw_fold_df['datetime'])
+                fold_rl_df = pd.merge(fold_rl_df, raw_fold_df, on=['datetime', 'ticker'], how='inner')
+                all_rl_data.append(fold_rl_df)
 
     if not all_rl_data:
-        print("❌ Не найдено успешных предсказаний. Сборка остановлена.")
+        print("\n❌ Не удалось собрать данные. Проверь наличие обученных моделей во всех папках.")
         return
 
     print("\n🧩 Склеиваем Walk-Forward фолды...")
     final_env_df = pd.concat(all_rl_data, ignore_index=True)
     
-    # Гарантируем, что колонка close_y существует (этого ждет твой rl_env.py)
-    if 'close_y' not in final_env_df.columns:
-        if 'close' in final_env_df.columns:
-            final_env_df['close_y'] = final_env_df['close']
-        else:
-            print("⚠️ ВНИМАНИЕ: Колонка с ценой закрытия не найдена!")
-    
+    if 'close_y' not in final_env_df.columns and 'close' in final_env_df.columns:
+        final_env_df['close_y'] = final_env_df['close']
+        
     final_env_df = final_env_df.sort_values(['ticker', 'datetime']).reset_index(drop=True)
-
     final_env_df.to_parquet(OUTPUT_FILE, index=False)
+    
     with open(METADATA_FILE, 'w', encoding='utf-8') as f:
         json.dump(env_metadata, f, indent=4, ensure_ascii=False)
         
-    print(f"\n🎉 ГОТОВО! Песочница (Топ-3) для RL-агента успешно собрана.")
-    print(f"   Сохранено в: {OUTPUT_FILE.absolute()}")
-    print(f"   Всего строк: {len(final_env_df)}")
-    print(f"   Количество признаков (State Space): {len(final_env_df.columns)} колонок")
+    print(f"\n🎉 ПЕСОЧНИЦА УСПЕШНО СОБРАНА!")
+    print(f"   Файл: {OUTPUT_FILE}")
+    print(f"   Количество строк: {len(final_env_df)}")
+    print(f"   Количество фичей + вероятностей: {len(final_env_df.columns)}")
 
 if __name__ == "__main__":
     main()

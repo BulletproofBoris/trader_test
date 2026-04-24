@@ -42,7 +42,7 @@ class TradingEnv(gym.Env):
         self.max_episode_steps = env_config.get("max_episode_steps", 252) 
         
         self.action_space = spaces.Discrete(3)
-        self.exclude_cols = ['datetime', 'ticker', 'open', 'high', 'low', 'close_x', 'close_y', 'volume']
+        self.exclude_cols = ['datetime', 'ticker', 'open', 'high', 'low', 'close', 'close_x', 'close_y', 'volume']
         
         sample_df = self.grouped_data[self.tickers[0]]
         self.feature_cols = [col for col in sample_df.columns if col not in self.exclude_cols]
@@ -72,7 +72,8 @@ class TradingEnv(gym.Env):
         self.current_ticker = self.np_random.choice(self.tickers)
         self.df = self.grouped_data[self.current_ticker]
         
-        self.prices = self.df['close_y'].values.astype(np.float32)
+        price_col = 'close_y' if 'close_y' in self.df.columns else 'close'
+        self.prices = self.df[price_col].values.astype(np.float32)
         self.features = self.df[self.feature_cols].values.astype(np.float32)
         self.total_steps = len(self.prices) - 1
         
