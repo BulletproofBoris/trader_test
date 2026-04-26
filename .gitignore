@@ -26,6 +26,12 @@ data/*
 !data/processed/
 data/processed/*
 
+!data/processed/2000_2026_1d_90_15/
+data/processed/2000_2026_1d_90_15/*
+
+!data/processed/2000_2026_1d_90_15/fold_*/
+data/processed/2000_2026_1d_90_15/fold_*/*
+
 !data/processed/2000_2026_1d_60_10/
 data/processed/2000_2026_1d_60_10/*
 
@@ -45,6 +51,7 @@ data/processed/2000_2026_1d_18_3/*
 data/processed/2000_2026_1d_18_3/fold_*/*
 
 # 3. Наконец-то разрешаем саму папку models и её содержимое!
+!data/processed/2000_2026_1d_90_15/fold_*/models/
 !data/processed/2000_2026_1d_60_10/fold_*/models/
 !data/processed/2000_2026_1d_30_5/fold_*/models/
 !data/processed/2000_2026_1d_18_3/fold_*/models/
