@@ -56,6 +56,8 @@ data/processed/2000_2026_1d_18_3/fold_*/*
 !data/processed/2000_2026_1d_30_5/fold_*/models/
 !data/processed/2000_2026_1d_18_3/fold_*/models/
 
+
+!data/processed/archive
 # Все результаты, логи, графики и модели
 *.log
 *.png

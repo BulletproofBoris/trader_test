@@ -29,7 +29,12 @@ def create_sequences(df, feature_cols, lookback):
 
 def main():
     PROCESSED_DIR = Path("data/processed")
-    CONFIGS = {"c60": "2000_2026_1d_60_10", "c30": "2000_2026_1d_30_5", "c18": "2000_2026_1d_18_3"}
+    CONFIGS = {
+        "c90": "2000_2026_1d_90_15",
+        "c60": "2000_2026_1d_60_10", 
+        "c30": "2000_2026_1d_30_5", 
+        "c18": "2000_2026_1d_18_3"
+    }
     
     RL_ENV_DIR = PROCESSED_DIR / "2000_2026_1d" / "rl_env"
     CHAMPIONS_DIR = RL_ENV_DIR / "champions"
@@ -40,8 +45,9 @@ def main():
         shutil.rmtree(CHAMPIONS_DIR)
     CHAMPIONS_DIR.mkdir(parents=True, exist_ok=True)
     
-    base_config_dir = PROCESSED_DIR / CONFIGS["c60"]
+    base_config_dir = PROCESSED_DIR / CONFIGS["c90"]
     if not base_config_dir.exists():
+        print(f"❌ Базовая папка {base_config_dir} не найдена!")
         return
         
     folds = sorted([d.name for d in base_config_dir.glob("fold_*") if d.is_dir()])
@@ -88,29 +94,44 @@ def main():
             model_scores = []
             
             for model_path in models:
+                # Очищаем сессию
                 tf.keras.backend.clear_session()
+                
                 try:
                     model = tf.keras.models.load_model(model_path, compile=False)
                     
-                    # 🛠 ХАК ДЛЯ СПАСЕНИЯ СТАРЫХ МОДЕЛЕЙ: Подгонка формы тензора
                     expected_features = model.input_shape[2]
                     current_features = X_val.shape[2]
                     
                     if expected_features < current_features:
-                        # Если данных больше, чем ждет модель -> обрезаем лишний хвост
                         X_model = X_val[:, :, :expected_features]
                     elif expected_features > current_features:
-                        # Если данных меньше, чем ждет модель -> добиваем нулями (padding)
                         padding_shape = (X_val.shape[0], X_val.shape[1], expected_features - current_features)
                         zeros_padding = np.zeros(padding_shape, dtype=np.float32)
                         X_model = np.concatenate([X_val, zeros_padding], axis=2)
                     else:
                         X_model = X_val
                         
-                    probs = model.predict(X_model, batch_size=2048, verbose=0)
+                    # --- ИСПРАВЛЕНИЕ: РУЧНОЙ БАТЧИНГ БЕЗ ПЕРЕГРУЗКИ ПАМЯТИ ---
+                    batch_size = 2048
+                    probs_list = []
+                    
+                    for j in range(0, len(X_model), batch_size):
+                        batch_x = X_model[j:j+batch_size]
+                        # Прямой Eager-вызов без построения графов tf.data.Dataset
+                        batch_probs = model(batch_x, training=False).numpy()
+                        probs_list.append(batch_probs)
+                        
+                    probs = np.concatenate(probs_list, axis=0)
+                    # ---------------------------------------------------------
+                    
                     preds = np.argmax(probs, axis=1)
                     score = f1_score(y_val, preds, average='macro')
                     model_scores.append({"path": model_path, "f1": score, "probs": probs})
+                    
+                    # Уничтожаем модель
+                    del model
+                    
                 except Exception as e:
                     print(f"      ❌ ОШИБКА ({model_path.name}): {e}")
                     
@@ -139,12 +160,9 @@ def main():
             else:
                 fold_merged_df = pd.merge(fold_merged_df, preds_df, on=['datetime', 'ticker'], how='inner')
         
-        # 🛠 ИСПРАВЛЕНИЕ 192 КОЛОНОК: Правильное слияние базовых фичей и котировок
         if fold_merged_df is not None and not fold_merged_df.empty:
-            # 1. Берем 149 индикаторов
-            base_parquet = PROCESSED_DIR / CONFIGS["c60"] / fold_name / "data" / "val" / "ml_data.parquet"
-            # 2. Берем сырые OHLCV
-            base_csv = PROCESSED_DIR / CONFIGS["c60"] / fold_name / "data" / "val" / "dataset.csv"
+            base_parquet = PROCESSED_DIR / CONFIGS["c90"] / fold_name / "data" / "val" / "ml_data.parquet"
+            base_csv = PROCESSED_DIR / CONFIGS["c90"] / fold_name / "data" / "val" / "dataset.csv"
             
             if base_parquet.exists() and base_csv.exists():
                 df_indicators = pd.read_parquet(base_parquet)
@@ -153,10 +171,7 @@ def main():
                 df_ohlcv = pd.read_csv(base_csv)[['datetime', 'ticker', 'open', 'high', 'low', 'close', 'volume']]
                 df_ohlcv['datetime'] = pd.to_datetime(df_ohlcv['datetime'])
                 
-                # Склеиваем индикаторы + котировки
                 fold_rl_df = pd.merge(df_ohlcv, df_indicators, on=['datetime', 'ticker'], how='inner')
-                
-                # Склеиваем получившуюся базу + мнения экспертов
                 fold_rl_df = pd.merge(fold_rl_df, fold_merged_df, on=['datetime', 'ticker'], how='inner')
                 all_rl_data.append(fold_rl_df)
 
@@ -167,7 +182,6 @@ def main():
     print("\n🧩 Склеиваем Walk-Forward фолды...")
     final_env_df = pd.concat(all_rl_data, ignore_index=True)
     
-    # Защита от дублей колонок при join
     final_env_df = final_env_df.loc[:, ~final_env_df.columns.duplicated()]
     
     if 'close_y' not in final_env_df.columns and 'close' in final_env_df.columns:
