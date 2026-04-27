@@ -157,7 +157,6 @@ def create_model(seq_len, n_features, l2_reg=1e-5):
     
     return Model(inputs=inputs, outputs=outputs)
 
-# ОБНОВЛЕННАЯ ФУНКЦИЯ СОХРАНЕНИЯ С НОВЫМ ФОРМАТОМ
 def save_record_model(model, history, acc, loss, train_time, run, args, seq_len, n_features, models_dir):
     timestamp = int(time.time())
     model_filename = f"trading_bot_best_acc_{acc*100:.2f}_run{run}_{timestamp}.keras"
@@ -202,8 +201,6 @@ def save_record_model(model, history, acc, loss, train_time, run, args, seq_len,
     
     with open(meta_filepath, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=4, ensure_ascii=False)
-        
-    print(f"🏆 НОВЫЙ РЕКОРД СОХРАНЕН: {model_filename}")
 
 def main(args):
     BASE_DIR = Path(__file__).resolve().parent.parent
@@ -214,14 +211,26 @@ def main(args):
     MODELS_DIR = FOLD_DIR / "models"
     ARTIFACTS_DIR = FOLD_DIR / "artifacts"
     
-    # --- ЛОГИКА ПРОВЕРКИ СУЩЕСТВУЮЩИХ МОДЕЛЕЙ ---
+    # --- ИЩЕМ ИСТОРИЧЕСКИЙ РЕКОРД ДЛЯ --APPEND ---
+    global_best_loss = float('inf')
+    
     if MODELS_DIR.exists() and any(MODELS_DIR.glob("*.keras")):
         if args.force:
             print(f"⚠️ Флаг --force: Очищаем папку моделей фолда [{args.fold}]...")
             for f in MODELS_DIR.glob("*"): 
                 f.unlink()
         elif args.append:
-            print(f"➕ Флаг --append: Модели в фолде [{args.fold}] существуют. Обучаем новые поверх старых.")
+            print(f"➕ Флаг --append: Ищем исторический рекорд в прошлых моделях...")
+            for f in MODELS_DIR.glob("*.json"):
+                try:
+                    with open(f, 'r') as jf:
+                        m_data = json.load(jf)
+                        m_loss = m_data.get("metrics", {}).get("val_loss", float('inf'))
+                        if m_loss < global_best_loss:
+                            global_best_loss = m_loss
+                except Exception:
+                    pass
+            print(f"🛡️ Базовый рекорд для побития (Loss): {global_best_loss if global_best_loss != float('inf') else 'Нет данных'}")
         else:
             print(f"✅ В фолде [{args.fold}] уже есть обученные модели.")
             print("⏭️ Пропуск обучения. Используйте --force (перезапись) или --append (добавление).")
@@ -256,10 +265,8 @@ def main(args):
     train_dataset = load_tfrecord_dataset(train_record_path, args.batch_size, seq_len, n_features, is_training=True)
     val_dataset = load_tfrecord_dataset(val_record_path, args.batch_size, seq_len, n_features, is_training=False)
 
-    global_best_acc = 0.0
-
     for run in range(1, args.runs + 1):
-        print(f"\n{'-'*50}\n🔄 ИТЕРАЦИЯ {run}/{args.runs} (Лучшая точность сессии: {global_best_acc*100:.2f}%)\n{'-'*50}")
+        print(f"\n{'-'*50}\n🔄 ИТЕРАЦИЯ {run}/{args.runs} (Цель Loss < {global_best_loss:.4f})\n{'-'*50}")
         
         tf.keras.backend.clear_session()
         model = create_model(seq_len, n_features, args.l2_reg)
@@ -293,17 +300,28 @@ def main(args):
 
         train_time = time.time() - start_time
 
+        # ЖЕЛЕЗНАЯ ГАРАНТИЯ: всегда восстанавливаем веса лучшей эпохи перед оценкой
         if os.path.exists(temp_weights_path):
             model.load_weights(temp_weights_path)
             os.remove(temp_weights_path)
             
+        # Оцениваем именно восстановленную (лучшую) версию модели
         loss, acc = model.evaluate(val_dataset, verbose=0)
-        print(f"\n🎯 Точность итерации {run}: {acc*100:.2f}%")
+        print(f"\n🎯 Итог итерации {run}: Val Loss = {loss:.4f} | Val Acc = {acc*100:.2f}%")
 
-        if acc > global_best_acc:
-            global_best_acc = acc
-            # ОБНОВЛЕННЫЙ ВЫЗОВ (Передаем n_features)
+        # --- ОБНОВЛЕННАЯ ЛОГИКА СОХРАНЕНИЯ (Смотрим на LOSS) ---
+        # Порог в 1.15 взят навскидку, чтобы не сохранять откровенный мусор при пустой папке
+        if loss < global_best_loss or loss < 1.15:
+            if loss < global_best_loss:
+                print(f"🏆 НОВЫЙ РЕКОРД по Loss! {global_best_loss:.4f} -> {loss:.4f}")
+                global_best_loss = loss
+            else:
+                print(f"👍 Хорошая модель (Loss: {loss:.4f}). Добавляем в пул.")
+                
             save_record_model(model, history, acc, loss, train_time, run, args, seq_len, n_features, MODELS_DIR)
+            print(f"💾 Модель успешно сохранена!")
+        else:
+            print(f"🗑️ Модель слабая (Loss: {loss:.4f}). Не дотягивает до рекорда. Удаляем.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
