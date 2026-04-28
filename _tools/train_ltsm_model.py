@@ -35,7 +35,7 @@ if gpus:
         print(e)
 
 class SmartBacktrackCallback(Callback):
-    def __init__(self, best_weights_path, monitor_loss='val_loss', factor=0.5, patience=4, min_lr=1e-6, max_rollbacks=2, stop_threshold=1.1):
+    def __init__(self, best_weights_path, target_loss, monitor_loss='val_loss', factor=0.5, patience=4, min_lr=1e-6, max_rollbacks=3, stop_threshold=1.1):
         super(SmartBacktrackCallback, self).__init__()
         self.monitor_loss = monitor_loss
         self.factor = factor
@@ -44,6 +44,7 @@ class SmartBacktrackCallback(Callback):
         self.max_rollbacks = max_rollbacks
         self.best_weights_path = str(best_weights_path)
         self.stop_threshold = stop_threshold
+        self.target_loss = target_loss # Глобальный рекорд для сравнения
         
         self.wait = 0
         self.rollback_count = 0
@@ -54,6 +55,7 @@ class SmartBacktrackCallback(Callback):
         current_loss = logs.get(self.monitor_loss)
         if current_loss is None: return
 
+        # Жесткий отсев откровенного мусора в начале обучения
         if epoch > 10 and current_loss > self.stop_threshold and self.wait >= self.patience:
             print(f"\n⚠️ Итерация безнадежна (val_loss {current_loss:.4f} > {self.stop_threshold}). Пропускаем.")
             self.model.stop_training = True
@@ -69,8 +71,12 @@ class SmartBacktrackCallback(Callback):
             if self.wait >= self.patience:
                 self.rollback_count += 1
                 
-                if self.rollback_count > self.max_rollbacks:
-                    print(f"\n🛑 Итерация застряла на плато. Досрочное завершение.")
+                # --- НОВАЯ СТРОГАЯ ЛОГИКА ПРЕРЫВАНИЯ ---
+                if self.rollback_count >= self.max_rollbacks:
+                    if self.best_loss >= self.target_loss:
+                        print(f"\n🛑 Лимит откатов ({self.max_rollbacks}) исчерпан. Локальный максимум ({self.best_loss:.4f}) слабее рекорда ({self.target_loss:.4f}). СБРОС ИТЕРАЦИИ.")
+                    else:
+                        print(f"\n🛑 Итерация застряла, но глобальный рекорд УЖЕ ПОБИТ ({self.best_loss:.4f} < {self.target_loss:.4f})! Идем на сохранение.")
                     self.model.stop_training = True
                     return
 
@@ -281,7 +287,7 @@ def main(args):
         callbacks = [
             EarlyStopping(monitor='val_loss', patience=15, verbose=0, restore_best_weights=True),
             ModelCheckpoint(filepath=temp_weights_path, save_weights_only=True, monitor='val_loss', mode='min', save_best_only=True, verbose=0),
-            SmartBacktrackCallback(best_weights_path=temp_weights_path, monitor_loss='val_loss', patience=4, factor=0.5, min_lr=1e-6, max_rollbacks=2)
+            SmartBacktrackCallback(best_weights_path=temp_weights_path, target_loss=global_best_loss, monitor_loss='val_loss', patience=4, factor=0.5, min_lr=1e-6, max_rollbacks=3)
         ]
 
         start_time = time.time()
@@ -308,20 +314,15 @@ def main(args):
         # Оцениваем именно восстановленную (лучшую) версию модели
         loss, acc = model.evaluate(val_dataset, verbose=0)
         print(f"\n🎯 Итог итерации {run}: Val Loss = {loss:.4f} | Val Acc = {acc*100:.2f}%")
-
         # --- ОБНОВЛЕННАЯ ЛОГИКА СОХРАНЕНИЯ (Смотрим на LOSS) ---
         # Порог в 1.15 взят навскидку, чтобы не сохранять откровенный мусор при пустой папке
-        if loss < global_best_loss or loss < 1.15:
-            if loss < global_best_loss:
-                print(f"🏆 НОВЫЙ РЕКОРД по Loss! {global_best_loss:.4f} -> {loss:.4f}")
-                global_best_loss = loss
-            else:
-                print(f"👍 Хорошая модель (Loss: {loss:.4f}). Добавляем в пул.")
-                
+        if loss < global_best_loss:
+            print(f"🏆 НОВЫЙ РЕКОРД по Loss! {global_best_loss:.4f} -> {loss:.4f}")
+            global_best_loss = loss
             save_record_model(model, history, acc, loss, train_time, run, args, seq_len, n_features, MODELS_DIR)
             print(f"💾 Модель успешно сохранена!")
         else:
-            print(f"🗑️ Модель слабая (Loss: {loss:.4f}). Не дотягивает до рекорда. Удаляем.")
+            print(f"🗑️ Модель не побила рекорд (Loss: {loss:.4f} >= {global_best_loss:.4f}). Удаляем мусор.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
