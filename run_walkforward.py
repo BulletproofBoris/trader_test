@@ -7,13 +7,13 @@ from pathlib import Path
 def main():
     # 1. Настраиваем парсер аргументов командной строки
     parser = argparse.ArgumentParser(description="Оркестратор массового обучения LSTM (Walk-Forward)")
-    parser.add_argument("--dataset_dir", type=str, default="data/processed/2000_2026_1d", help="Путь к корневой папке датасета")
+    parser.add_argument("--dataset_dir", type=str, default="data/processed/2000_2026_1d_6_1", help="Путь к корневой папке датасета")
     parser.add_argument("--runs", type=int, default=100, help="Количество прогонов (runs) для каждого фолда")
     parser.add_argument("--batch_size", type=int, default=8192, help="Размер батча")
     parser.add_argument("--epochs", type=int, default=100, help="Количество эпох обучения")
-    parser.add_argument("--l2_reg", type=str, default="1e-4", help="Коэффициент L2 регуляризации")
-    parser.add_argument("--lr", type=str, default="1e-3", help="Стартовый Learning Rate")
-    parser.add_argument("--start_fold", type=str, default=None, help="Имя фолда, с которого начать (например, fold_2018)")
+    parser.add_argument("--l2_reg", type=str, default="1e-3", help="Коэффициент L2 регуляризации")
+    parser.add_argument("--lr", type=str, default="8e-2", help="Стартовый Learning Rate")
+    parser.add_argument("--start_fold", type=str, default="fold_2010", help="Имя фолда, с которого начать (например, fold_2018)")
     
     # Флаги-переключатели (если переданы - значит True, иначе False)
     parser.add_argument("--append", action="store_true", help="Дообучать поверх существующих моделей")
