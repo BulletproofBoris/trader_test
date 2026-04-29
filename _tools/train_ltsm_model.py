@@ -148,7 +148,7 @@ class SmartOrchestrator:
 # ⏱️ ЭЛАСТИЧНЫЙ ПРОФАЙЛЕР (Динамическое бюджетирование эпох)
 # ==============================================================================
 class ElasticPatienceProfiler(Callback):
-    def __init__(self, orchestrator, fold_name, max_epochs):
+    def __init__(self, orchestrator, fold_name, max_epochs, bonus_ratio=0.1, min_delta=0.001):
         super().__init__()
         self.orchestrator = orchestrator
         self.fold_name = fold_name
@@ -157,9 +157,10 @@ class ElasticPatienceProfiler(Callback):
         self.pruned = False
         
         # Эластичная математика (доли от max_epochs)
-        self.micro_patience = max(1, int(0.1 * max_epochs))       # 1/10
-        self.macro_patience = max(3.0, float(0.3 * max_epochs))   # 3/10 (Стартовый лимит)
-        self.macro_bonus = 0.3 * self.micro_patience              # Бонус за локальный рекорд
+        self.micro_patience = max(1, int(0.1 * max_epochs))
+        self.macro_patience = max(3.0, float(0.3 * max_epochs))
+        self.macro_bonus = bonus_ratio * self.micro_patience 
+        self.min_delta = min_delta # Насколько должен упасть Loss
         
         self.micro_wait = 0
         self.local_best_loss = np.inf
@@ -442,8 +443,8 @@ def main(args):
 
         temp_weights_path = MODELS_DIR / f"temp_best_{run_id}.weights.h5"
         
-        # Эластичный профайлер (заменяет классический EarlyStopping)
-        profiler = ElasticPatienceProfiler(orchestrator, args.fold, args.epochs)
+        # Обновляем вызов профайлера
+        profiler = ElasticPatienceProfiler(orchestrator, args.fold, args.epochs, args.bonus_ratio, args.min_delta)
         
         callbacks = [
             ModelCheckpoint(filepath=temp_weights_path, save_weights_only=True, monitor='val_loss', mode='min', save_best_only=True, verbose=0),
@@ -501,5 +502,7 @@ if __name__ == "__main__":
     parser.add_argument("--l2_reg", type=float, default=1e-5, help="L2 регуляризация")
     parser.add_argument("--force", action="store_true", help="Принудительное обучение с удалением старых моделей")
     parser.add_argument("--append", action="store_true", help="Добавить новые модели, не удаляя старые")
+    parser.add_argument("--bonus_ratio", type=float, default=0.1, help="Доля от микро-лимита, добавляемая за рекорд")
+    parser.add_argument("--min_delta", type=float, default=0.001, help="Минимальное улучшение Loss для получения бонуса")
     args = parser.parse_args()
     main(args)
