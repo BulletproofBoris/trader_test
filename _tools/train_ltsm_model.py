@@ -128,7 +128,7 @@ class SmartOrchestrator:
             return False
         return True
 
-    def should_prune_model(self, fold_name, current_loss, threshold=2.5):
+    def should_prune_model(self, fold_name, current_loss, threshold=2.0):
         rows = self._execute("SELECT val_loss FROM runs WHERE fold=? AND status='COMPLETED' AND val_loss IS NOT NULL", (fold_name,), fetch=True)
         losses = [r[0] for r in rows]
         if len(losses) < 5: 
@@ -194,7 +194,7 @@ class ElasticPatienceProfiler(Callback):
         # 2. Триггер Микро-счетчика (Проверка на мусор)
         if self.micro_wait >= self.micro_patience:
             # Терпение лопнуло. Спрашиваем базу, маргинал ли эта модель
-            if self.orchestrator.should_prune_model(self.fold_name, current_loss, threshold=2.5):
+            if self.orchestrator.should_prune_model(self.fold_name, current_loss, threshold=2.0):
                 print(f"🛑 [Отсев] Нет улучшений {self.micro_patience} эпох. Z-Score > 2.5. Итерация убита.")
                 self.model.stop_training = True
                 self.pruned = True
