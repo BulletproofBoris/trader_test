@@ -49,16 +49,11 @@ class MathTrendAnalyzer:
 
     @staticmethod
     def calculate_macro_trend(losses_array, min_margin_pct=0.001, max_margin_pct=0.005):
-        """
-        Строит кривую после 15 записей, фильтрует хаос, считает дисперсию асимптоты.
-        Окрестность жестко зажата от 0.1% до 0.5% от значения асимптоты.
-        """
         if len(losses_array) < 15: 
             return None, None, None
         
         df = pd.DataFrame({'loss': losses_array})
         
-        # Фильтрация выбросов холодного старта (IQR)
         q1 = df['loss'].quantile(0.25)
         q3 = df['loss'].quantile(0.75)
         iqr = q3 - q1
@@ -96,18 +91,15 @@ class MathTrendAnalyzer:
             )
             a, b, c = popt
             
-            # Определение дисперсии
             variance_c = pcov[2][2] if not np.isinf(pcov[2][2]) else 0.0
             std_c = np.sqrt(variance_c)
             
-            # Жесткий коридор окрестности (Защита от раздувания дисперсии)
             statistical_margin = std_c * 2.0 
             abs_min_margin = c * min_margin_pct 
             abs_max_margin = c * max_margin_pct 
             
             margin = np.clip(statistical_margin, abs_min_margin, abs_max_margin)
             
-            # Считаем количество ранов до вхождения в окрестность
             target_loss = c + margin
             if target_loss >= y_fit[0]:
                 runs_to_margin = 0 
@@ -122,7 +114,7 @@ class MathTrendAnalyzer:
 
 
 # ==============================================================================
-# 🧠 SMART ORCHESTRATOR (Динамический контроль)
+# 🧠 SMART ORCHESTRATOR (Swarm Control)
 # ==============================================================================
 class SmartOrchestrator:
     def __init__(self, db_path):
@@ -162,18 +154,30 @@ class SmartOrchestrator:
                 status TEXT
             )
         """)
+        self._execute("CREATE TABLE IF NOT EXISTS folds_meta (fold_name TEXT PRIMARY KEY, best_loss REAL)")
         self._execute("""
-            CREATE TABLE IF NOT EXISTS folds_meta (
-                fold_name TEXT PRIMARY KEY,
-                best_loss REAL
+            CREATE TABLE IF NOT EXISTS workers (
+                worker_id TEXT PRIMARY KEY,
+                fold TEXT,
+                remaining_runs INTEGER,
+                last_seen REAL
             )
         """)
 
+    def update_worker_heartbeat(self, worker_id, fold_name, remaining_runs):
+        """Регистрирует воркер и его оставшийся бюджет, удаляет зависшие процессы (> 10 мин)"""
+        current_time = time.time()
+        self._execute(
+            "INSERT OR REPLACE INTO workers (worker_id, fold, remaining_runs, last_seen) VALUES (?, ?, ?, ?)",
+            (worker_id, fold_name, remaining_runs, current_time)
+        )
+        self._execute("DELETE FROM workers WHERE last_seen < ?", (current_time - 600,))
+
+    def remove_worker(self, worker_id):
+        """Штатный выход воркера из пула"""
+        self._execute("DELETE FROM workers WHERE worker_id=?", (worker_id,))
+
     def sync_with_filesystem(self, models_dir, fold_name, dataset_name):
-        """
-        Умная инкрементальная синхронизация БД с папкой моделей.
-        Пропускает то, что уже есть, добавляет только новые файлы.
-        """
         total_files = 0
         added_count = 0
         best_synced_loss = float('inf')
@@ -192,7 +196,6 @@ class SmartOrchestrator:
                 if not run_id or loss is None:
                     continue
 
-                # Инкрементальная проверка: если ран уже в БД, ничего не делаем
                 exists = self._execute("SELECT 1 FROM runs WHERE run_id=?", (run_id,), fetch=True)
                 if not exists:
                     self._execute(
@@ -207,10 +210,9 @@ class SmartOrchestrator:
             except Exception as e:
                 print(f"⚠️ Ошибка чтения файла {meta_file.name}: {e}")
 
-        # Детальный отчет о синхронизации
         if total_files > 0:
             if added_count > 0:
-                print(f"🔄 [Синхронизация] Проверено файлов: {total_files}. Добавлено {added_count} новых записей в существующую БД.")
+                print(f"🔄 [Синхронизация] Проверено файлов: {total_files}. Добавлено {added_count} записей.")
                 rows = self._execute("SELECT best_loss FROM folds_meta WHERE fold_name=?", (fold_name,), fetch=True)
                 current_db_best = rows[0][0] if rows else float('inf')
 
@@ -218,7 +220,7 @@ class SmartOrchestrator:
                     self._execute("INSERT OR REPLACE INTO folds_meta (fold_name, best_loss) VALUES (?, ?)", (fold_name, best_synced_loss))
                     print(f"🌍 [Оркестратор] Глобальный рекорд БД обновлен из найденных файлов: {best_synced_loss:.4f}")
             else:
-                print(f"✅ [Синхронизация] Проверено файлов: {total_files}. База данных полностью актуальна, неучтенных моделей нет.")
+                print(f"✅ [Синхронизация] Проверено файлов: {total_files}. База актуальна.")
 
     def get_history(self, fold_name):
         rows = self._execute(
@@ -227,33 +229,46 @@ class SmartOrchestrator:
         )
         return [r[0] for r in rows]
 
-    def evaluate_potential(self, fold_name, total_budget):
+    def evaluate_potential(self, fold_name, worker_id, remaining_runs, current_run_index):
         """
-        Динамическая проверка перед стартом каждого рана.
-        Возвращает: (bool_can_continue, str_reason, float_global_best)
+        Динамическая проверка с учетом мощности ВСЕГО пула.
         """
-        losses = self.get_history(fold_name)
-        
+        # 1. Отправляем пульс и регистрируем свой остаток
+        self.update_worker_heartbeat(worker_id, fold_name, remaining_runs)
+
+        # 2. Получаем глобальный рекорд
         meta_rows = self._execute("SELECT best_loss FROM folds_meta WHERE fold_name=?", (fold_name,), fetch=True)
         global_best = meta_rows[0][0] if meta_rows else float('inf')
 
+        # 3. Вычисляем суммарный бюджет пула
+        res = self._execute("SELECT SUM(remaining_runs), COUNT(worker_id) FROM workers WHERE fold=?", (fold_name,), fetch=True)
+        pool_budget = res[0][0] if res and res[0][0] else 0
+        active_workers = res[0][1] if res else 0
+
+        # 🐝 ИГНОРИРОВАНИЕ ПРОВЕРОК НА ПЕРВОЙ ИТЕРАЦИИ (ЗАЩИТА ОТ ГОНКИ / RACE CONDITION)
+        if current_run_index == 1:
+            return True, f"Прогрев воркера (Итерация 1). В пуле: {active_workers} процесс(ов). Ожидаем остальных...", global_best
+
+        # 4. Анализ тренда (со 2-й итерации)
+        losses = self.get_history(fold_name)
+
         if len(losses) < 15:
-            return True, f"Сбор базовой статистики (Собрано {len(losses)}/15 ранов)...", global_best
+            return True, f"Сбор статистики пулом ({len(losses)}/15)... Воркеров: {active_workers}, Резерв пула: {pool_budget}", global_best
 
         c, margin, required_runs = MathTrendAnalyzer.calculate_macro_trend(losses)
         
         if c is None:
-            return True, "Недостаточно качественных данных для мат. прогноза. Продолжаем сбор.", global_best
+            return True, f"Анализ недоступен. Продолжаем. Воркеров: {active_workers}, Резерв пула: {pool_budget}", global_best
 
         neighborhood_top = c + margin
         
         if global_best <= neighborhood_top:
             return False, f"Достигнут предел. Рекорд ({global_best:.4f}) вошел в стат. окрестность асимптоты ({c:.4f} + {margin:.4f})", global_best
         
-        if required_runs > total_budget:
-            return False, f"Асимптота недостижима за бюджет. Нужно ~{required_runs} ранов, а всего выделено {total_budget}.", global_best
+        if required_runs > pool_budget:
+            return False, f"Нехватка мощности пула. Нужно ~{required_runs} ранов, а у {active_workers} активных процессов осталось {pool_budget}.", global_best
 
-        return True, f"Цель достижима за ~{required_runs} ранов. Ожидаемая асимптота: {c:.4f} (Окрестность: до {neighborhood_top:.4f})", global_best
+        return True, f"Пул справится (Воркеров: {active_workers}, Резерв пула: {pool_budget}). Цель: ~{required_runs} ранов до {c:.4f}", global_best
 
     def register_run_start(self, run_id, config, fold, hyperparams):
         params_json = json.dumps(hyperparams)
@@ -493,7 +508,6 @@ def main(args):
                 
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     
-    # 🔄 СИНХРОНИЗАЦИЯ БАЗЫ ДАННЫХ И ПАПКИ МОДЕЛЕЙ
     if args.append and MODELS_DIR.exists():
         dataset_name = Path(args.dataset_dir).name
         orchestrator.sync_with_filesystem(MODELS_DIR, args.fold, dataset_name)
@@ -504,8 +518,6 @@ def main(args):
     with open(ARTIFACTS_DIR / "features_selected.json", 'r', encoding='utf-8') as f:
         n_features = len(json.load(f).get("feature_order", []))
             
-    print(f"🚀 Старт обучения. Фолд: [{args.fold}] | Общий бюджет: {args.runs} ранов")
-    
     train_record_path = TFRECORDS_DIR / "train" / "data.tfrecord"
     val_record_path = TFRECORDS_DIR / "val" / "data.tfrecord"
     
@@ -513,68 +525,83 @@ def main(args):
     train_dataset = load_tfrecord_dataset(train_record_path, args.batch_size, seq_len, n_features, is_training=True)
     val_dataset = load_tfrecord_dataset(val_record_path, args.batch_size, seq_len, n_features, is_training=False)
 
-    for run in range(1, args.runs + 1):
-        
-        # ДИНАМИЧЕСКАЯ ПРОВЕРКА ПОТЕНЦИАЛА ПЕРЕД КАЖДЫМ РАНОМ
-        can_continue, reason, global_best_loss = orchestrator.evaluate_potential(args.fold, args.runs)
-        
-        if not can_continue:
-            print(f"\n{'='*60}\n🛑 ГЛОБАЛЬНАЯ ОСТАНОВКА ФОЛДА: {reason}\n{'='*60}")
-            break
+    # 🐝 Генерируем уникальный ID для этого конкретного процесса
+    worker_id = f"worker_{os.getpid()}_{hashlib.md5(str(time.time()).encode()).hexdigest()[:6]}"
+    print(f"🚀 Старт обучения. Фолд: [{args.fold}] | Воркер зарегистрирован: {worker_id}")
 
-        print(f"\n{'-'*60}\n🔄 ИТЕРАЦИЯ {run}/{args.runs} (Цель Loss < {global_best_loss:.4f})")
-        print(f"📈 Статус макро-тренда: {reason}\n{'-'*60}")
-        
-        run_id = f"run_{hashlib.md5(f'{time.time()}_{np.random.randint(1000)}'.encode()).hexdigest()[:8]}"
-        hyperparams = {"lr": args.lr, "batch": args.batch_size, "l2": args.l2_reg}
-        
-        orchestrator.register_run_start(run_id, Path(args.dataset_dir).name, args.fold, hyperparams)
-        
-        tf.keras.backend.clear_session()
-        model = create_model(seq_len, n_features, args.l2_reg)
-        optimizer = tf.keras.optimizers.Adam(learning_rate=args.lr)
-        model.compile(
-            optimizer=optimizer,
-            loss=tf.keras.losses.CategoricalCrossentropy(label_smoothing=0.1),
-            metrics=['accuracy']
-        )
-
-        temp_weights_path = MODELS_DIR / f"temp_best_{run_id}.weights.h5"
-        profiler = ElasticPatienceProfiler(orchestrator, args.fold, args.epochs, args.bonus_ratio, args.min_delta)
-        
-        callbacks = [
-            ModelCheckpoint(filepath=temp_weights_path, save_weights_only=True, monitor='val_loss', mode='min', save_best_only=True, verbose=0),
-            SmartBacktrackCallback(best_weights_path=temp_weights_path, monitor_loss='val_loss', patience=4),
-            profiler
-        ]
-
-        try:
-            history = model.fit(train_dataset, epochs=args.epochs, validation_data=val_dataset, callbacks=callbacks, class_weight=class_weights_dict, verbose=2)
-        except KeyboardInterrupt:
-            print("\n⚠️ Multi-Run прерван пользователем.")
-            break
-
-        if os.path.exists(temp_weights_path):
-            model.load_weights(temp_weights_path)
-            os.remove(temp_weights_path)
+    try:
+        for run in range(1, args.runs + 1):
             
-        loss, acc = model.evaluate(val_dataset, verbose=0)
-        
-        status = 'PRUNED' if profiler.pruned else 'COMPLETED'
-        orchestrator.register_run_end(
-            run_id=run_id, fold_name=args.fold, val_loss=loss, val_acc=acc,
-            avg_epoch_time=profiler.avg_epoch_time, overhead_time=profiler.overhead_time,
-            total_ttc=profiler.total_ttc, status=status
-        )
-        
-        if profiler.pruned:
-            continue
+            # Считаем, сколько ранов осталось именно у этого воркера
+            remaining_runs_for_this_worker = args.runs - run + 1
+            
+            # 🐝 ПЕРЕДАЕМ ТЕКУЩИЙ ИНДЕКС ИТЕРАЦИИ ДЛЯ БЛОКИРОВКИ ПРОВЕРОК НА СТАРТЕ
+            can_continue, reason, global_best_loss = orchestrator.evaluate_potential(
+                args.fold, worker_id, remaining_runs_for_this_worker, current_run_index=run
+            )
+            
+            if not can_continue:
+                print(f"\n{'='*60}\n🛑 ГЛОБАЛЬНАЯ ОСТАНОВКА ФОЛДА: {reason}\n{'='*60}")
+                break
 
-        print(f"\n🎯 Итог итерации {run}: Val Loss = {loss:.4f} | Val Acc = {acc*100:.2f}%")
-        
-        if loss < global_best_loss:
-            save_record_model(model, history, acc, loss, profiler.total_ttc, run_id, args, seq_len, n_features, MODELS_DIR)
-            print(f"🏆 Модель-рекордсмен успешно сохранена!")
+            print(f"\n{'-'*60}\n🔄 ИТЕРАЦИЯ {run}/{args.runs} (Цель Loss < {global_best_loss:.4f})")
+            print(f"📈 Статус макро-тренда: {reason}\n{'-'*60}")
+            
+            run_id = f"run_{hashlib.md5(f'{time.time()}_{np.random.randint(1000)}'.encode()).hexdigest()[:8]}"
+            hyperparams = {"lr": args.lr, "batch": args.batch_size, "l2": args.l2_reg}
+            
+            orchestrator.register_run_start(run_id, Path(args.dataset_dir).name, args.fold, hyperparams)
+            
+            tf.keras.backend.clear_session()
+            model = create_model(seq_len, n_features, args.l2_reg)
+            optimizer = tf.keras.optimizers.Adam(learning_rate=args.lr)
+            model.compile(
+                optimizer=optimizer,
+                loss=tf.keras.losses.CategoricalCrossentropy(label_smoothing=0.1),
+                metrics=['accuracy']
+            )
+
+            temp_weights_path = MODELS_DIR / f"temp_best_{run_id}.weights.h5"
+            profiler = ElasticPatienceProfiler(orchestrator, args.fold, args.epochs, args.bonus_ratio, args.min_delta)
+            
+            callbacks = [
+                ModelCheckpoint(filepath=temp_weights_path, save_weights_only=True, monitor='val_loss', mode='min', save_best_only=True, verbose=0),
+                SmartBacktrackCallback(best_weights_path=temp_weights_path, monitor_loss='val_loss', patience=4),
+                profiler
+            ]
+
+            try:
+                history = model.fit(train_dataset, epochs=args.epochs, validation_data=val_dataset, callbacks=callbacks, class_weight=class_weights_dict, verbose=2)
+            except KeyboardInterrupt:
+                print("\n⚠️ Multi-Run прерван пользователем.")
+                break
+
+            if os.path.exists(temp_weights_path):
+                model.load_weights(temp_weights_path)
+                os.remove(temp_weights_path)
+                
+            loss, acc = model.evaluate(val_dataset, verbose=0)
+            
+            status = 'PRUNED' if profiler.pruned else 'COMPLETED'
+            orchestrator.register_run_end(
+                run_id=run_id, fold_name=args.fold, val_loss=loss, val_acc=acc,
+                avg_epoch_time=profiler.avg_epoch_time, overhead_time=profiler.overhead_time,
+                total_ttc=profiler.total_ttc, status=status
+            )
+            
+            if profiler.pruned:
+                continue
+
+            print(f"\n🎯 Итог итерации {run}: Val Loss = {loss:.4f} | Val Acc = {acc*100:.2f}%")
+            
+            if loss < global_best_loss:
+                save_record_model(model, history, acc, loss, profiler.total_ttc, run_id, args, seq_len, n_features, MODELS_DIR)
+                print(f"🏆 Модель-рекордсмен успешно сохранена!")
+
+    finally:
+        # 🐝 Корректно выходим из пула по завершении работы или при ошибке
+        orchestrator.remove_worker(worker_id)
+        print(f"👋 Воркер {worker_id} освободил мощности и покинул пул.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
