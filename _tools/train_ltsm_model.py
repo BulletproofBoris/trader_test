@@ -148,7 +148,6 @@ class SmartOrchestrator:
                     raise
 
     def _create_tables(self):
-        # Таблица метаданных больше не содержит status='CLOSED'. Только живые рекорды.
         self._execute("""
             CREATE TABLE IF NOT EXISTS runs (
                 run_id TEXT PRIMARY KEY,
@@ -170,6 +169,57 @@ class SmartOrchestrator:
             )
         """)
 
+    def sync_with_filesystem(self, models_dir, fold_name, dataset_name):
+        """
+        Умная инкрементальная синхронизация БД с папкой моделей.
+        Пропускает то, что уже есть, добавляет только новые файлы.
+        """
+        total_files = 0
+        added_count = 0
+        best_synced_loss = float('inf')
+
+        for meta_file in Path(models_dir).glob("*.json"):
+            total_files += 1
+            try:
+                with open(meta_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+
+                run_id = data.get("run_id")
+                loss = data.get("metrics", {}).get("val_loss")
+                acc = data.get("metrics", {}).get("val_acc", 0) / 100.0 
+                ttc = data.get("training_stats", {}).get("training_time_seconds", 0.0)
+
+                if not run_id or loss is None:
+                    continue
+
+                # Инкрементальная проверка: если ран уже в БД, ничего не делаем
+                exists = self._execute("SELECT 1 FROM runs WHERE run_id=?", (run_id,), fetch=True)
+                if not exists:
+                    self._execute(
+                        """INSERT INTO runs 
+                           (run_id, config, fold, hyperparams, val_loss, val_acc, avg_epoch_time, overhead_time, total_ttc, status) 
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'COMPLETED')""",
+                        (run_id, dataset_name, fold_name, "{}", loss, acc, 0.0, 0.0, ttc)
+                    )
+                    added_count += 1
+                    best_synced_loss = min(best_synced_loss, loss)
+
+            except Exception as e:
+                print(f"⚠️ Ошибка чтения файла {meta_file.name}: {e}")
+
+        # Детальный отчет о синхронизации
+        if total_files > 0:
+            if added_count > 0:
+                print(f"🔄 [Синхронизация] Проверено файлов: {total_files}. Добавлено {added_count} новых записей в существующую БД.")
+                rows = self._execute("SELECT best_loss FROM folds_meta WHERE fold_name=?", (fold_name,), fetch=True)
+                current_db_best = rows[0][0] if rows else float('inf')
+
+                if best_synced_loss < current_db_best:
+                    self._execute("INSERT OR REPLACE INTO folds_meta (fold_name, best_loss) VALUES (?, ?)", (fold_name, best_synced_loss))
+                    print(f"🌍 [Оркестратор] Глобальный рекорд БД обновлен из найденных файлов: {best_synced_loss:.4f}")
+            else:
+                print(f"✅ [Синхронизация] Проверено файлов: {total_files}. База данных полностью актуальна, неучтенных моделей нет.")
+
     def get_history(self, fold_name):
         rows = self._execute(
             "SELECT val_loss FROM runs WHERE fold=? AND status='COMPLETED' AND val_loss IS NOT NULL ORDER BY rowid ASC",
@@ -180,11 +230,10 @@ class SmartOrchestrator:
     def evaluate_potential(self, fold_name, total_budget):
         """
         Динамическая проверка перед стартом каждого рана.
-        Возвращает: (bool_can_continue, str_reason)
+        Возвращает: (bool_can_continue, str_reason, float_global_best)
         """
         losses = self.get_history(fold_name)
         
-        # Получаем текущий лучший рекорд из БД
         meta_rows = self._execute("SELECT best_loss FROM folds_meta WHERE fold_name=?", (fold_name,), fetch=True)
         global_best = meta_rows[0][0] if meta_rows else float('inf')
 
@@ -198,11 +247,9 @@ class SmartOrchestrator:
 
         neighborhood_top = c + margin
         
-        # 1. Проверка вхождения в окрестность
         if global_best <= neighborhood_top:
             return False, f"Достигнут предел. Рекорд ({global_best:.4f}) вошел в стат. окрестность асимптоты ({c:.4f} + {margin:.4f})", global_best
         
-        # 2. Проверка бюджета
         if required_runs > total_budget:
             return False, f"Асимптота недостижима за бюджет. Нужно ~{required_runs} ранов, а всего выделено {total_budget}.", global_best
 
@@ -222,7 +269,6 @@ class SmartOrchestrator:
             WHERE run_id=?
         """, (val_loss, val_acc, avg_epoch_time, overhead_time, total_ttc, status, run_id))
         
-        # Обновляем лучший результат, если он побит
         if val_loss is not None:
             rows = self._execute("SELECT best_loss FROM folds_meta WHERE fold_name=?", (fold_name,), fetch=True)
             if not rows or val_loss < rows[0][0]:
@@ -446,6 +492,11 @@ def main(args):
             return
                 
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    
+    # 🔄 СИНХРОНИЗАЦИЯ БАЗЫ ДАННЫХ И ПАПКИ МОДЕЛЕЙ
+    if args.append and MODELS_DIR.exists():
+        dataset_name = Path(args.dataset_dir).name
+        orchestrator.sync_with_filesystem(MODELS_DIR, args.fold, dataset_name)
     
     with open(DATASET_DIR / "metadata.json", 'r', encoding='utf-8') as f:
         seq_len = json.load(f)["parameters"]["lookback"]
