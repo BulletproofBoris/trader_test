@@ -8,7 +8,6 @@ import hashlib
 from pathlib import Path
 import warnings
 import numpy as np
-
 import pandas as pd
 from scipy.optimize import curve_fit
 
@@ -49,15 +48,17 @@ class MathTrendAnalyzer:
         return a * np.exp(-b * x) + c
 
     @staticmethod
-    # Я установил потолок max_margin_pct=0.005 (0.5%, как ты просил изначально). 
-    # Если ты реально имел в виду 5%, просто поменяй на 0.05
     def calculate_macro_trend(losses_array, min_margin_pct=0.001, max_margin_pct=0.005):
+        """
+        Строит кривую после 15 записей, фильтрует хаос, считает дисперсию асимптоты.
+        Окрестность жестко зажата от 0.1% до 0.5% от значения асимптоты.
+        """
         if len(losses_array) < 15: 
             return None, None, None
         
         df = pd.DataFrame({'loss': losses_array})
         
-        # 1. Фильтрация выбросов
+        # Фильтрация выбросов холодного старта (IQR)
         q1 = df['loss'].quantile(0.25)
         q3 = df['loss'].quantile(0.75)
         iqr = q3 - q1
@@ -95,23 +96,18 @@ class MathTrendAnalyzer:
             )
             a, b, c = popt
             
-            # 2. Определение дисперсии
+            # Определение дисперсии
             variance_c = pcov[2][2] if not np.isinf(pcov[2][2]) else 0.0
             std_c = np.sqrt(variance_c)
             
-            # ----------------------------------------------------------------
-            # ИСПРАВЛЕННАЯ ЛОГИКА: ЖЕСТКИЙ КОРИДОР ОКРЕСТНОСТИ
-            # ----------------------------------------------------------------
+            # Жесткий коридор окрестности (Защита от раздувания дисперсии)
             statistical_margin = std_c * 2.0 
+            abs_min_margin = c * min_margin_pct 
+            abs_max_margin = c * max_margin_pct 
             
-            abs_min_margin = c * min_margin_pct # Не меньше 0.1% (защита от переобучения на идеальной кривой)
-            abs_max_margin = c * max_margin_pct # СТРОГИЙ ПОТОЛОК (0.5% по умолчанию)
-            
-            # Зажимаем статистику в наши жесткие рамки
             margin = np.clip(statistical_margin, abs_min_margin, abs_max_margin)
-            # ----------------------------------------------------------------
             
-            # 3. Считаем количество ранов до вхождения в окрестность
+            # Считаем количество ранов до вхождения в окрестность
             target_loss = c + margin
             if target_loss >= y_fit[0]:
                 runs_to_margin = 0 
@@ -126,7 +122,7 @@ class MathTrendAnalyzer:
 
 
 # ==============================================================================
-# 🧠 SMART ORCHESTRATOR 
+# 🧠 SMART ORCHESTRATOR (Динамический контроль)
 # ==============================================================================
 class SmartOrchestrator:
     def __init__(self, db_path):
@@ -152,6 +148,7 @@ class SmartOrchestrator:
                     raise
 
     def _create_tables(self):
+        # Таблица метаданных больше не содержит status='CLOSED'. Только живые рекорды.
         self._execute("""
             CREATE TABLE IF NOT EXISTS runs (
                 run_id TEXT PRIMARY KEY,
@@ -169,15 +166,47 @@ class SmartOrchestrator:
         self._execute("""
             CREATE TABLE IF NOT EXISTS folds_meta (
                 fold_name TEXT PRIMARY KEY,
-                best_loss REAL,
-                runs_since_improvement INTEGER,
-                status TEXT
+                best_loss REAL
             )
         """)
 
-    def get_active_processes_count(self, fold_name):
-        rows = self._execute("SELECT COUNT(*) FROM runs WHERE fold=? AND status='TRAINING'", (fold_name,), fetch=True)
-        return rows[0][0] if rows else 0
+    def get_history(self, fold_name):
+        rows = self._execute(
+            "SELECT val_loss FROM runs WHERE fold=? AND status='COMPLETED' AND val_loss IS NOT NULL ORDER BY rowid ASC",
+            (fold_name,), fetch=True
+        )
+        return [r[0] for r in rows]
+
+    def evaluate_potential(self, fold_name, total_budget):
+        """
+        Динамическая проверка перед стартом каждого рана.
+        Возвращает: (bool_can_continue, str_reason)
+        """
+        losses = self.get_history(fold_name)
+        
+        # Получаем текущий лучший рекорд из БД
+        meta_rows = self._execute("SELECT best_loss FROM folds_meta WHERE fold_name=?", (fold_name,), fetch=True)
+        global_best = meta_rows[0][0] if meta_rows else float('inf')
+
+        if len(losses) < 15:
+            return True, f"Сбор базовой статистики (Собрано {len(losses)}/15 ранов)...", global_best
+
+        c, margin, required_runs = MathTrendAnalyzer.calculate_macro_trend(losses)
+        
+        if c is None:
+            return True, "Недостаточно качественных данных для мат. прогноза. Продолжаем сбор.", global_best
+
+        neighborhood_top = c + margin
+        
+        # 1. Проверка вхождения в окрестность
+        if global_best <= neighborhood_top:
+            return False, f"Достигнут предел. Рекорд ({global_best:.4f}) вошел в стат. окрестность асимптоты ({c:.4f} + {margin:.4f})", global_best
+        
+        # 2. Проверка бюджета
+        if required_runs > total_budget:
+            return False, f"Асимптота недостижима за бюджет. Нужно ~{required_runs} ранов, а всего выделено {total_budget}.", global_best
+
+        return True, f"Цель достижима за ~{required_runs} ранов. Ожидаемая асимптота: {c:.4f} (Окрестность: до {neighborhood_top:.4f})", global_best
 
     def register_run_start(self, run_id, config, fold, hyperparams):
         params_json = json.dumps(hyperparams)
@@ -186,82 +215,22 @@ class SmartOrchestrator:
             (run_id, config, fold, params_json)
         )
 
-    def register_run_end(self, run_id, val_loss, val_acc, avg_epoch_time, overhead_time, total_ttc, status='COMPLETED'):
+    def register_run_end(self, run_id, fold_name, val_loss, val_acc, avg_epoch_time, overhead_time, total_ttc, status='COMPLETED'):
         self._execute("""
             UPDATE runs 
             SET val_loss=?, val_acc=?, avg_epoch_time=?, overhead_time=?, total_ttc=?, status=? 
             WHERE run_id=?
         """, (val_loss, val_acc, avg_epoch_time, overhead_time, total_ttc, status, run_id))
-
-    def update_fold_meta(self, fold_name, current_loss, max_patience, total_budgeted_runs):
-        rows = self._execute("SELECT best_loss, runs_since_improvement, status FROM folds_meta WHERE fold_name=?", (fold_name,), fetch=True)
-        if not rows:
-            self._execute("INSERT INTO folds_meta (fold_name, best_loss, runs_since_improvement, status) VALUES (?, ?, 0, 'OPEN')", 
-                          (fold_name, current_loss))
-            best_loss, runs_stuck, status = current_loss, 0, 'OPEN'
-        else:
-            best_loss, runs_stuck, status = rows[0]
-
-        if status == 'CLOSED': return
-
-        # 1. Проверка на новый рекорд
-        is_new_best = False
-        if current_loss < best_loss - 0.0005: 
-            self._execute("UPDATE folds_meta SET best_loss=?, runs_since_improvement=0 WHERE fold_name=?", (current_loss, fold_name))
-            print(f"🌍 [Оркестратор] Фолд обновлен. Новый глобальный рекорд: {current_loss:.4f}")
-            best_loss = current_loss
-            is_new_best = True
-        else:
-            runs_stuck += 1
-            if runs_stuck >= max_patience:
-                self._execute("UPDATE folds_meta SET runs_since_improvement=?, status='CLOSED' WHERE fold_name=?", (runs_stuck, fold_name))
-                print(f"🌍 [Оркестратор] ФОЛД ЗАКРЫТ. Лимит макро-терпения ({max_patience}) исчерпан.")
-                return
-            else:
-                self._execute("UPDATE folds_meta SET runs_since_improvement=? WHERE fold_name=?", (runs_stuck, fold_name))
-
-        # =================================================================
-        # 2. МАТЕМАТИЧЕСКАЯ ОЦЕНКА ДОСТИЖИМОСТИ АСИМПТОТЫ
-        # =================================================================
-        run_rows = self._execute("SELECT val_loss FROM runs WHERE fold=? AND status='COMPLETED' AND val_loss IS NOT NULL ORDER BY rowid ASC", (fold_name,), fetch=True)
         
-        if run_rows and len(run_rows) >= 15:
-            losses = [r[0] for r in run_rows]
-            active_workers = self.get_active_processes_count(fold_name)
-            
-            c, margin, required_runs = MathTrendAnalyzer.calculate_macro_trend(losses)
-            
-            if c is not None:
-                neighborhood_top = c + margin
-                print(f"\n📈 [Макро-Анализ] База: {len(losses)} ранов. Асимптота: {c:.4f} (Окрестность: до {neighborhood_top:.4f})")
-                
-                # Условие А: Мы уже достигли окрестности асимптоты
-                if best_loss <= neighborhood_top:
-                    print(f"🛑 [Math Stop] Лучший Loss ({best_loss:.4f}) вошел в стат. окрестность асимптоты. Продолжать обучение бессмысленно. ЗАКРЫВАЕМ ФОЛД.")
-                    self._execute("UPDATE folds_meta SET status='CLOSED' WHERE fold_name=?", (fold_name,))
-                    return
-                
-                # Условие Б: Нам не хватит бюджета (учитывая активные параллельные процессы)
-                print(f"   Прогноз: для вхождения в окрестность потребуется всего ~{required_runs} ранов.")
-                print(f"   Бюджет: выделено {total_budgeted_runs} ранов. Сейчас активно: {active_workers} процессов.")
-                
-                if required_runs > total_budgeted_runs:
-                    print(f"🛑 [Math Stop] Ожидаемое количество ранов ({required_runs}) превышает бюджет ({total_budgeted_runs}). Асимптота недостижима за это время. ЗАКРЫВАЕМ ФОЛД.")
-                    self._execute("UPDATE folds_meta SET status='CLOSED' WHERE fold_name=?", (fold_name,))
-                    return
-                else:
-                    if is_new_best:
-                        print(f"✅ Переоценка успешна. Цель достижима. Продолжаем обучение.")
-
-    def check_fold_status(self, fold_name):
-        rows = self._execute("SELECT status FROM folds_meta WHERE fold_name=?", (fold_name,), fetch=True)
-        if rows and rows[0][0] == 'CLOSED':
-            return False
-        return True
+        # Обновляем лучший результат, если он побит
+        if val_loss is not None:
+            rows = self._execute("SELECT best_loss FROM folds_meta WHERE fold_name=?", (fold_name,), fetch=True)
+            if not rows or val_loss < rows[0][0]:
+                self._execute("INSERT OR REPLACE INTO folds_meta (fold_name, best_loss) VALUES (?, ?)", (fold_name, val_loss))
+                print(f"🌍 [Оркестратор] Фолд обновлен. Новый глобальный рекорд БД: {val_loss:.4f}")
 
     def should_prune_model(self, fold_name, current_loss, threshold=2.0):
-        rows = self._execute("SELECT val_loss FROM runs WHERE fold=? AND status='COMPLETED' AND val_loss IS NOT NULL", (fold_name,), fetch=True)
-        losses = [r[0] for r in rows]
+        losses = self.get_history(fold_name)
         if len(losses) < 5: 
             return False
         mu, sigma = np.mean(losses), np.std(losses)
@@ -275,7 +244,7 @@ class SmartOrchestrator:
 
 
 # ==============================================================================
-# ⏱️ ЭЛАСТИЧНЫЙ ПРОФАЙЛЕР (Возвращен к исходному состоянию без математики)
+# ⏱️ ЭЛАСТИЧНЫЙ ПРОФАЙЛЕР (Микро-уровень)
 # ==============================================================================
 class ElasticPatienceProfiler(Callback):
     def __init__(self, orchestrator, fold_name, max_epochs, bonus_ratio=0.1, min_delta=0.001):
@@ -310,11 +279,7 @@ class ElasticPatienceProfiler(Callback):
         if current_loss < self.local_best_loss - 1e-4:
             self.local_best_loss = current_loss
             self.micro_wait = 0
-            
-            old_macro = self.macro_patience
             self.macro_patience = min(float(self.max_epochs), self.macro_patience + self.macro_bonus)
-            if int(self.macro_patience) > int(old_macro):
-                pass # print(f"📈 [Бонус] Локальный рекорд!") 
         else:
             self.micro_wait += 1
 
@@ -343,7 +308,7 @@ class ElasticPatienceProfiler(Callback):
 # 📉 Smart Backtrack Callback 
 # ==============================================================================
 class SmartBacktrackCallback(Callback):
-    def __init__(self, best_weights_path, target_loss, monitor_loss='val_loss', factor=0.5, patience=4, min_lr=1e-6, max_rollbacks=3):
+    def __init__(self, best_weights_path, monitor_loss='val_loss', factor=0.5, patience=4, min_lr=1e-6, max_rollbacks=3):
         super(SmartBacktrackCallback, self).__init__()
         self.monitor_loss = monitor_loss
         self.factor = factor
@@ -351,7 +316,6 @@ class SmartBacktrackCallback(Callback):
         self.min_lr = min_lr
         self.max_rollbacks = max_rollbacks
         self.best_weights_path = str(best_weights_path)
-        self.target_loss = target_loss 
         
         self.wait = 0
         self.rollback_count = 0
@@ -474,23 +438,11 @@ def main(args):
     db_path = FOLD_DIR / "trading_factory.db"
     orchestrator = SmartOrchestrator(db_path)
     
-    global_best_loss = float('inf')
-    
     if MODELS_DIR.exists() and any(MODELS_DIR.glob("*.keras")):
         if args.force:
             for f in MODELS_DIR.glob("*"): f.unlink()
-        elif args.append:
-            for f in MODELS_DIR.glob("*.json"):
-                try:
-                    with open(f, 'r') as jf:
-                        m_data = json.load(jf)
-                        m_loss = m_data.get("metrics", {}).get("val_loss", float('inf'))
-                        if m_loss < global_best_loss:
-                            global_best_loss = m_loss
-                except Exception:
-                    pass
-        else:
-            print(f"✅ В фолде [{args.fold}] уже есть обученные модели.")
+        elif not args.append:
+            print(f"✅ В фолде [{args.fold}] уже есть обученные модели (Используйте --append или --force).")
             return
                 
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
@@ -501,7 +453,7 @@ def main(args):
     with open(ARTIFACTS_DIR / "features_selected.json", 'r', encoding='utf-8') as f:
         n_features = len(json.load(f).get("feature_order", []))
             
-    print(f"🚀 Старт обучения. Фолд: [{args.fold}] | Бюджет: {args.runs} ранов")
+    print(f"🚀 Старт обучения. Фолд: [{args.fold}] | Общий бюджет: {args.runs} ранов")
     
     train_record_path = TFRECORDS_DIR / "train" / "data.tfrecord"
     val_record_path = TFRECORDS_DIR / "val" / "data.tfrecord"
@@ -510,19 +462,21 @@ def main(args):
     train_dataset = load_tfrecord_dataset(train_record_path, args.batch_size, seq_len, n_features, is_training=True)
     val_dataset = load_tfrecord_dataset(val_record_path, args.batch_size, seq_len, n_features, is_training=False)
 
-    max_patience_runs = max(5, int(args.runs * 0.20))
-
     for run in range(1, args.runs + 1):
-        if not orchestrator.check_fold_status(args.fold):
-            print(f"\n{'='*50}\n🛑 ГЛОБАЛЬНАЯ ОСТАНОВКА: Фолд {args.fold} закрыт Оркестратором.\n{'='*50}")
+        
+        # ДИНАМИЧЕСКАЯ ПРОВЕРКА ПОТЕНЦИАЛА ПЕРЕД КАЖДЫМ РАНОМ
+        can_continue, reason, global_best_loss = orchestrator.evaluate_potential(args.fold, args.runs)
+        
+        if not can_continue:
+            print(f"\n{'='*60}\n🛑 ГЛОБАЛЬНАЯ ОСТАНОВКА ФОЛДА: {reason}\n{'='*60}")
             break
 
-        print(f"\n{'-'*50}\n🔄 ИТЕРАЦИЯ {run}/{args.runs} (Цель Loss < {global_best_loss:.4f})\n{'-'*50}")
+        print(f"\n{'-'*60}\n🔄 ИТЕРАЦИЯ {run}/{args.runs} (Цель Loss < {global_best_loss:.4f})")
+        print(f"📈 Статус макро-тренда: {reason}\n{'-'*60}")
         
         run_id = f"run_{hashlib.md5(f'{time.time()}_{np.random.randint(1000)}'.encode()).hexdigest()[:8]}"
         hyperparams = {"lr": args.lr, "batch": args.batch_size, "l2": args.l2_reg}
         
-        # Регистрируем процесс как TRAINING (Оркестратор учтет его как активный)
         orchestrator.register_run_start(run_id, Path(args.dataset_dir).name, args.fold, hyperparams)
         
         tf.keras.backend.clear_session()
@@ -539,7 +493,7 @@ def main(args):
         
         callbacks = [
             ModelCheckpoint(filepath=temp_weights_path, save_weights_only=True, monitor='val_loss', mode='min', save_best_only=True, verbose=0),
-            SmartBacktrackCallback(best_weights_path=temp_weights_path, target_loss=global_best_loss, monitor_loss='val_loss', patience=4),
+            SmartBacktrackCallback(best_weights_path=temp_weights_path, monitor_loss='val_loss', patience=4),
             profiler
         ]
 
@@ -557,7 +511,7 @@ def main(args):
         
         status = 'PRUNED' if profiler.pruned else 'COMPLETED'
         orchestrator.register_run_end(
-            run_id=run_id, val_loss=loss, val_acc=acc,
+            run_id=run_id, fold_name=args.fold, val_loss=loss, val_acc=acc,
             avg_epoch_time=profiler.avg_epoch_time, overhead_time=profiler.overhead_time,
             total_ttc=profiler.total_ttc, status=status
         )
@@ -568,11 +522,8 @@ def main(args):
         print(f"\n🎯 Итог итерации {run}: Val Loss = {loss:.4f} | Val Acc = {acc*100:.2f}%")
         
         if loss < global_best_loss:
-            global_best_loss = loss
             save_record_model(model, history, acc, loss, profiler.total_ttc, run_id, args, seq_len, n_features, MODELS_DIR)
-            
-        # Обновляем макро-статус. Передаем общий бюджет из args.runs.
-        orchestrator.update_fold_meta(args.fold, loss, max_patience_runs, args.runs)
+            print(f"🏆 Модель-рекордсмен успешно сохранена!")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
