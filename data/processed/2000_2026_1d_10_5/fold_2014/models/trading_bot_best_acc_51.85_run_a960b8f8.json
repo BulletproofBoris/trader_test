@@ -1,0 +1,13 @@
+{
+    "model_name": "trading_bot_best_acc_51.85_run_a960b8f8.keras",
+    "run_id": "run_a960b8f8",
+    "dataset": "2000_2026_1d_10_5",
+    "fold": "fold_2014",
+    "metrics": {
+        "val_loss": 1.0645042657852173,
+        "val_acc": 51.85467600822449
+    },
+    "training_stats": {
+        "training_time_seconds": 192.03051018714905
+    }
+}
