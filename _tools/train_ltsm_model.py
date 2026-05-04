@@ -39,78 +39,96 @@ if gpus:
         print(e)
 
 
+import numpy as np
+import pandas as pd
+from scipy.optimize import curve_fit
+import warnings
+
 # ==============================================================================
-# 🧮 МАТЕМАТИЧЕСКИЙ МАКРО-АНАЛИЗАТОР (HPO Scaling Laws)
+# 🧮 МАТЕМАТИЧЕСКИЙ МАКРО-АНАЛИЗАТОР (Bootstrap + Smart Leash Edition)
 # ==============================================================================
 class MathTrendAnalyzer:
     @staticmethod
-    def decay_model(x, a, b, c):
+    def exp_func(x, a, b, c):
         return a * np.exp(-b * x) + c
 
     @staticmethod
-    def calculate_macro_trend(losses_array, min_margin_pct=0.001, max_margin_pct=0.005):
+    def calculate_macro_trend(losses_array):
         if len(losses_array) < 15: 
-            return None, None, None
+            return None, None, None, None
         
         df = pd.DataFrame({'loss': losses_array})
+        q1, q3 = df['loss'].quantile(0.25), df['loss'].quantile(0.75)
+        valid_max = min(q3 + 1.5 * (q3 - q1), df['loss'].quantile(0.85))
         
-        q1 = df['loss'].quantile(0.25)
-        q3 = df['loss'].quantile(0.75)
-        iqr = q3 - q1
-        smart_max = q3 + 1.5 * iqr
-        p85 = df['loss'].quantile(0.85)
-        valid_max = min(smart_max, p85)
+        y_data_raw = np.array(losses_array)
+        x_data = np.arange(1, len(y_data_raw) + 1)
         
-        df['best_so_far'] = df['loss'].cummin()
-        x_data = np.arange(1, len(df) + 1)
-        y_data = df['best_so_far'].values
-        
-        valid_mask = (y_data >= 0.0) & (y_data <= valid_max)
+        valid_mask = (y_data_raw <= valid_max)
         x_fit = x_data[valid_mask]
-        y_fit = y_data[valid_mask]
+        y_fit_raw = y_data_raw[valid_mask]
         
-        if len(x_fit) < 5: 
-            return None, None, None
-            
-        amplitude = y_fit[0] - y_fit[-1]
-        if amplitude <= 0: amplitude = 0.01
-            
-        y_target = y_fit[-1]
-        initial_guess = [amplitude, 0.05, max(0, y_target - 0.01)]
-        lower_bounds = [0, 0, 0]
-        upper_bounds = [np.inf, np.inf, max(1e-5, y_target)]
+        if len(x_fit) < 10: 
+            return None, None, None, None
+
+        # --- ТВЕРДО УТВЕРЖДЕННЫЙ АЛГОРИТМ ---
+        obs_amp = max(1e-4, np.max(y_fit_raw) - np.min(y_fit_raw))
+        amplitude_guess = obs_amp
         
-        try:
-            popt, pcov = curve_fit(
-                MathTrendAnalyzer.decay_model, 
-                x_fit, 
-                y_fit, 
-                p0=initial_guess, 
-                bounds=(lower_bounds, upper_bounds), 
-                maxfev=10000
-            )
-            a, b, c = popt
-            
-            variance_c = pcov[2][2] if not np.isinf(pcov[2][2]) else 0.0
-            std_c = np.sqrt(variance_c)
-            
-            statistical_margin = std_c * 2.0 
-            abs_min_margin = c * min_margin_pct 
-            abs_max_margin = c * max_margin_pct 
-            
-            margin = np.clip(statistical_margin, abs_min_margin, abs_max_margin)
-            
-            target_loss = c + margin
-            if target_loss >= y_fit[0]:
-                runs_to_margin = 0 
-            else:
-                runs_to_margin = -np.log((target_loss - c) / a) / b
-                runs_to_margin = int(np.ceil(runs_to_margin))
+        min_c = max(0.0, np.min(y_fit_raw) - (obs_amp * 2.0))
+        max_a = max(1e-3, obs_amp * 1.5)
+
+        free_bounds = (
+            [1e-5, 1e-5, min_c], 
+            [max_a, 2.0, np.max(y_fit_raw)]
+        )
+        
+        bootstrap_a, bootstrap_b, bootstrap_c = [], [], []
+        
+        # Запускаем Бутстрэппинг с глушителем варнингов
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            for _ in range(50): # 50 прогонов для скорости в мультипроцессинге
+                sample_size = max(5, int(len(x_fit) * 0.8))
+                sample_indices = np.sort(np.random.choice(len(x_fit), size=sample_size, replace=False))
                 
-            return c, margin, runs_to_margin
+                x_boot = x_fit[sample_indices]
+                y_raw_boot = y_fit_raw[sample_indices]
+                y_cummin_boot = np.minimum.accumulate(y_raw_boot)
+                
+                p0 = [amplitude_guess, 0.05, max(min_c, np.min(y_cummin_boot) - 0.01)]
+                
+                try:
+                    popt, _ = curve_fit(
+                        MathTrendAnalyzer.exp_func, x_boot, y_cummin_boot, 
+                        p0=p0, bounds=free_bounds, maxfev=2000
+                    )
+                    bootstrap_a.append(popt[0])
+                    bootstrap_b.append(popt[1])
+                    bootstrap_c.append(popt[2])
+                except:
+                    pass
+                
+        if len(bootstrap_c) < 5:
+            return None, None, None, None
             
-        except Exception:
-            return None, None, None
+        true_a = np.median(bootstrap_a)
+        true_b = np.median(bootstrap_b)
+        true_c = np.median(bootstrap_c)
+        
+        q5_c = np.percentile(bootstrap_c, 5)
+        q95_c = np.percentile(bootstrap_c, 95)
+        uncertainty = q95_c - q5_c
+        
+        # Расчет прогнозируемого количества ранов (ETA)
+        margin = 0.001 
+        runs_needed = 0
+        if true_a > 0 and true_b > 0:
+            base = margin / true_a
+            if 0 < base < 1:
+                runs_needed = int(np.ceil(-np.log(base) / true_b))
+        
+        return true_c, q5_c, uncertainty, runs_needed
 
 
 # ==============================================================================
@@ -230,45 +248,43 @@ class SmartOrchestrator:
         return [r[0] for r in rows]
 
     def evaluate_potential(self, fold_name, worker_id, remaining_runs, current_run_index):
-        """
-        Динамическая проверка с учетом мощности ВСЕГО пула.
-        """
-        # 1. Отправляем пульс и регистрируем свой остаток
+        # 1. Отправляем пульс воркера в БД
         self.update_worker_heartbeat(worker_id, fold_name, remaining_runs)
 
-        # 2. Получаем глобальный рекорд
+        # 2. Узнаем рекорды и бюджет
         meta_rows = self._execute("SELECT best_loss FROM folds_meta WHERE fold_name=?", (fold_name,), fetch=True)
         global_best = meta_rows[0][0] if meta_rows else float('inf')
 
-        # 3. Вычисляем суммарный бюджет пула
         res = self._execute("SELECT SUM(remaining_runs), COUNT(worker_id) FROM workers WHERE fold=?", (fold_name,), fetch=True)
         pool_budget = res[0][0] if res and res[0][0] else 0
         active_workers = res[0][1] if res else 0
 
-        # 🐝 ИГНОРИРОВАНИЕ ПРОВЕРОК НА ПЕРВОЙ ИТЕРАЦИИ (ЗАЩИТА ОТ ГОНКИ / RACE CONDITION)
+        # Защита на старте
         if current_run_index == 1:
-            return True, f"Прогрев воркера (Итерация 1). В пуле: {active_workers} процесс(ов). Ожидаем остальных...", global_best
+            return True, f"Прогрев воркера. В пуле: {active_workers} процесс(ов).", global_best
 
-        # 4. Анализ тренда (со 2-й итерации)
+        # 3. Достаем историю
         losses = self.get_history(fold_name)
 
         if len(losses) < 15:
-            return True, f"Сбор статистики пулом ({len(losses)}/15)... Воркеров: {active_workers}, Резерв пула: {pool_budget}", global_best
+            return True, f"Сбор статистики пулом ({len(losses)}/15)...", global_best
 
-        c, margin, required_runs = MathTrendAnalyzer.calculate_macro_trend(losses)
+        # 4. Вызываем наш умный анализатор
+        true_c, q5_c, uncertainty, runs_needed = MathTrendAnalyzer.calculate_macro_trend(losses)
         
-        if c is None:
-            return True, f"Анализ недоступен. Продолжаем. Воркеров: {active_workers}, Резерв пула: {pool_budget}", global_best
-
-        neighborhood_top = c + margin
-        
-        if global_best <= neighborhood_top:
-            return False, f"Достигнут предел. Рекорд ({global_best:.4f}) вошел в стат. окрестность асимптоты ({c:.4f} + {margin:.4f})", global_best
-        
-        if required_runs > pool_budget:
-            return False, f"Нехватка мощности пула. Нужно ~{required_runs} ранов, а у {active_workers} активных процессов осталось {pool_budget}.", global_best
-
-        return True, f"Пул справится (Воркеров: {active_workers}, Резерв пула: {pool_budget}). Цель: ~{required_runs} ранов до {c:.4f}", global_best
+        if true_c is None:
+            return True, "Недостаточно стабильных данных для оценки тренда.", global_best
+            
+        # 5. Принимаем решение об остановке!
+        if uncertainty < 0.005:
+            if global_best <= q5_c:
+                return False, f"ЦЕЛЬ ДОСТИГНУТА! Рекорд ({global_best:.4f}) пробил доверительный порог ({q5_c:.4f}).", global_best
+            elif runs_needed > pool_budget:
+                return False, f"БЮДЖЕТ: Цель на ~{runs_needed} ране, но в пуле осталось {pool_budget}.", global_best
+            else:
+                return True, f"Тренд ясен (Асимптота: {true_c:.4f}). Достигнем примерно через {runs_needed} ранов.", global_best
+        else:
+            return True, f"Неопределенность высокая ({uncertainty:.5f}). Собираем больше данных...", global_best
 
     def register_run_start(self, run_id, config, fold, hyperparams):
         params_json = json.dumps(hyperparams)

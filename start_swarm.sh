@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # 1. Задаем команду (я обернул ее в переменную для красоты и удобства)
-CMD='python run_walkforward.py --dataset_dir "data/processed/2000_2026_1d_10_5" --bonus_ratio 0.15 --min_delta 0.001 --runs 150 --batch_size 2048 --epochs 100 --l2_reg "1e-3" --lr "8e-2" --start_fold "fold_2010" --append'
+CMD='python run_walkforward.py --dataset_dir "data/processed/2000_2026_1d_6_1" --bonus_ratio 0.15 --min_delta 0.001 --runs 150 --batch_size 1024 --epochs 100 --l2_reg "1e-3" --lr "8e-2" --start_fold "fold_2014" --append'
 
 # 2. Список твоих tmux-сессий
 SESSIONS=(
-    "train_20_1_worker_1"
-    "train_20_1_worker_2"
-    "train_20_1_worker_3"
-    "train_20_1_worker_4"
+    "train_6_1_worker_1"
+    "train_6_1_worker_2"
+    "train_6_1_worker_3"
+    "train_6_1_worker_4"
 )
 
 echo "🚀 Запуск Swarm-пула..."
