@@ -1,8 +1,7 @@
 #!/bin/bash
 
 # 1. Задаем команду (я обернул ее в переменную для красоты и удобства)
-CMD='python run_walkforward.py --dataset_dir "data/processed/2000_2026_1d_10_5" --bonus_ratio 0.15 --min_delta 0.001 --runs 50 --batch_size 2048 --epochs 100
---l2_reg "1e-3" --lr "8e-2" --start_fold "fold_2024" --append'
+CMD='python run_walkforward.py --dataset_dir "data/processed/2000_2026_1d_18_3" --bonus_ratio 0.15 --min_delta 0.001 --runs 50 --batch_size 2048 --epochs 100 --l2_reg "1e-3" --lr "8e-2" --start_fold "fold_2016" --append'
 
 # 2. Список твоих tmux-сессий
 SESSIONS=(
