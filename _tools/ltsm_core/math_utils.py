@@ -98,8 +98,8 @@ def find_max_physical_batch(create_model_fn, seq_len, n_features, starting_batch
             model.compile(optimizer='adam', loss='categorical_crossentropy')
             
             # Генерируем шум строго в формате float16, чтобы не бесить CuDNN
-            dummy_x = tf.random.normal((batch_size, seq_len, n_features), dtype=tf.float16)
-            dummy_y = tf.random.normal((batch_size, 3), dtype=tf.float16)
+            dummy_x = tf.random.normal((batch_size, seq_len, n_features))
+            dummy_y = tf.random.normal((batch_size, 3))
             
             model.train_on_batch(dummy_x, dummy_y)
             

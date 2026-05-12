@@ -10,6 +10,7 @@ def parse_tfrecord_fn(example, lookback, n_features):
     sequence.set_shape([lookback, n_features])
     label = tf.one_hot(example['target'], depth=3)
     label.set_shape([3])
+    
     return sequence, label
 
 def load_tfrecord_dataset(file_path, batch_size, lookback, n_features, is_training=True):

@@ -9,40 +9,40 @@ from tensorflow.keras.models import Model
 from tensorflow.keras import regularizers
 
 def create_model(seq_len, n_features, l2_reg=1e-5):
-    # Достаем глобальную политику (она уже установлена как 'mixed_float16' в главном скрипте)
-    policy = tf.keras.mixed_precision.global_policy()
+    # 1. ЖЕСТКО создаем политику BFLOAT16
+    policy = tf.keras.mixed_precision.Policy('mixed_bfloat16')
     
+    # 2. ВХОД СТРОГО БЕЗ ПОЛИТИКИ (Keras ждет float32)
     inputs = Input(shape=(seq_len, n_features), name="input_layer")
+    
+    # 3. ПРОКИДЫВАЕМ ПОЛИТИКУ ВО ВСЕ СЛОИ
     x = Dense(64, activation='linear', name='fp16_projection', dtype=policy)(inputs)
     
-    # ВОТ ЗДЕСЬ ИСПРАВЛЕНИЕ: прокидываем policy прямо в GRU
     x = Bidirectional(
         GRU(64, return_sequences=True, kernel_regularizer=regularizers.l2(l2_reg), dtype=policy), 
         dtype=policy
     )(x)
-    
     x = Dropout(0.2)(x)
     
-    # И во второй слой тоже
     x = Bidirectional(
         GRU(64, return_sequences=True, kernel_regularizer=regularizers.l2(l2_reg), dtype=policy), 
         dtype=policy
     )(x)
     res_x = Dropout(0.2)(x)
     
-    attn_out = Attention()([res_x, res_x])
-    x = Add()([res_x, attn_out])
-    x = LayerNormalization()(x)
+    attn_out = Attention(dtype=policy)([res_x, res_x])
+    x = Add(dtype=policy)([res_x, attn_out])
+    x = LayerNormalization(dtype=policy)(x)
     
-    avg_pool = GlobalAveragePooling1D()(x)
-    max_pool = GlobalMaxPooling1D()(x)
-    x = Concatenate()([avg_pool, max_pool])
+    avg_pool = GlobalAveragePooling1D(dtype=policy)(x)
+    max_pool = GlobalMaxPooling1D(dtype=policy)(x)
+    x = Concatenate(dtype=policy)([avg_pool, max_pool])
     
-    x = Dense(64, kernel_regularizer=regularizers.l2(l2_reg))(x)
-    x = Activation('gelu')(x)
+    x = Dense(64, kernel_regularizer=regularizers.l2(l2_reg), dtype=policy)(x)
+    x = Activation('gelu', dtype=policy)(x)
     x = Dropout(0.2)(x)
     
-    # Финальный слой ОСТАВЛЯЕМ в float32 (это спасает от NaN)
+    # 4. ВЫХОД СТРОГО ВО FLOAT32 (Защита от математических ошибок)
     outputs = Dense(3, activation='softmax', name='out', dtype='float32')(x)
     
     return Model(inputs=inputs, outputs=outputs)

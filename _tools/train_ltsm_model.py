@@ -8,6 +8,7 @@ import warnings
 import numpy as np
 import json
 
+# Жестко прописываем путь к корню инструментов
 current_dir = Path(__file__).resolve().parent
 if str(current_dir) not in sys.path:
     sys.path.insert(0, str(current_dir))
@@ -19,9 +20,9 @@ warnings.filterwarnings('ignore')
 
 import tensorflow as tf
 
-# Включаем Mixed Precision
-tf.keras.mixed_precision.set_global_policy('mixed_float16')
-print("✅ Mixed precision включена!")
+# Включаем BFLOAT16 (Оптимально для серии RTX 3000/4000/5000)
+tf.keras.mixed_precision.set_global_policy('mixed_bfloat16')
+print("✅ BFLOAT16 включен!")
 
 # Включаем Memory Growth
 gpus = tf.config.list_physical_devices('GPU')
@@ -31,7 +32,7 @@ if gpus:
         print("✅ Динамическое выделение видеопамяти включено!")
     except RuntimeError as e: print(e)
 
-# --- Импорты из нашего нового ядра ---
+# --- Импорты из ядра ---
 from ltsm_core.orchestrator import SmartOrchestrator
 from ltsm_core.data_loader import compute_class_weights_fast, load_tfrecord_dataset, count_tfrecord_samples
 from ltsm_core.model_builder import create_model, save_record_model
@@ -85,7 +86,6 @@ def main(args):
     print(f"🎯 Идеальный (математический) батч: {logical_batch}")
     print(f"🔧 Физический батч в VRAM: {phys_batch} (Шагов накопления: x{accum_steps})")
     
-    # Загружаем данные с физическим размером батча
     class_weights_dict = compute_class_weights_fast(train_record_path)
     train_dataset = load_tfrecord_dataset(train_record_path, phys_batch, seq_len, n_features, is_training=True)
     val_dataset = load_tfrecord_dataset(val_record_path, phys_batch, seq_len, n_features, is_training=False)
@@ -113,7 +113,7 @@ def main(args):
             model = create_model(seq_len, n_features, args.l2_reg)
             
             # --- Накопление градиентов ---
-            optimizer = tf.keras.optimizers.Adam(learning_rate=args.lr)
+            optimizer = tf.keras.optimizers.Adam(learning_rate=args.lr, clipnorm=1.0)
             if accum_steps > 1:
                 try:
                     optimizer = tf.keras.optimizers.experimental.GradientAccumulation(optimizer, accum_steps=accum_steps)
@@ -127,17 +127,10 @@ def main(args):
                 metrics=['accuracy']
             )
 
-            # === ТОЧНЫЙ ТЕСТ MIXED PRECISION ===
+            # === ПРОСТОЙ ТЕСТ MIXED PRECISION ===
             print(f"\n🧪 [Mixed Precision Check]")
             print(f"Политика первого слоя (fp16_projection): {model.get_layer('fp16_projection').compute_dtype}")
-            
-            gru_layers = [l for l in model.layers if 'bidirectional' in l.name]
-            if gru_layers:
-                # Заглядываем внутрь обертки (forward_layer — это сам GRU)
-                inner_gru = gru_layers[0].forward_layer
-                print(f"Политика нутра GRU (forward): {inner_gru.compute_dtype}")
-                
-            print(f"Политика вычислений финального слоя: {model.layers[-1].compute_dtype}")
+            print(f"Политика финального слоя (out): {model.get_layer('out').compute_dtype}")
             print("-" * 30 + "\n")
             # ==============================
 
@@ -147,6 +140,7 @@ def main(args):
             callbacks = [
                 ModelCheckpoint(filepath=temp_weights_path, save_weights_only=True, monitor='val_loss', mode='min', save_best_only=True, verbose=0),
                 SmartBacktrackCallback(best_weights_path=temp_weights_path, monitor_loss='val_loss', patience=4),
+                tf.keras.callbacks.TerminateOnNaN(),
                 profiler
             ]
 
