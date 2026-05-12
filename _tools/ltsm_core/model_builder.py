@@ -1,9 +1,10 @@
 import json
 from pathlib import Path
 import tensorflow as tf
-from tensorflow.keras.layers import Conv1D, BatchNormalization, Activation, Add, Input, Dense, Dropout, Attention, LayerNormalization, GlobalAveragePooling1D, GlobalMaxPooling1D, Concatenate
+from tensorflow.keras.layers import Conv1D, BatchNormalization, Activation, Add, Input, Dense, Dropout, LayerNormalization, GlobalAveragePooling1D, GlobalMaxPooling1D, Concatenate, MaxPooling1D
 from tensorflow.keras.models import Model
 from tensorflow.keras import regularizers
+import tensorflow as tf
 
 def create_model(seq_len, n_features, l2_reg=1e-5):
     policy = tf.keras.mixed_precision.Policy('mixed_bfloat16')
@@ -11,30 +12,29 @@ def create_model(seq_len, n_features, l2_reg=1e-5):
     
     x = Dense(64, activation='linear', name='fp16_projection', dtype=policy)(inputs)
     
-    # --- СВЕРТОЧНЫЙ БЛОК (Замена GRU) ---
-    # Свертка 1
+    # --- СВЕРТОЧНЫЙ БЛОК 1 (Локальные паттерны) ---
     conv1 = Conv1D(filters=64, kernel_size=3, padding='causal', dtype=policy)(x)
     conv1 = BatchNormalization(dtype=policy)(conv1)
     conv1 = Activation('gelu', dtype=policy)(conv1)
     conv1 = Dropout(0.2)(conv1)
     
-    # Свертка 2 (с расширенным окном)
+    # --- СВЕРТОЧНЫЙ БЛОК 2 (Глобальный тренд) ---
     conv2 = Conv1D(filters=64, kernel_size=5, padding='causal', dilation_rate=2, dtype=policy)(conv1)
     conv2 = BatchNormalization(dtype=policy)(conv2)
     conv2 = Activation('gelu', dtype=policy)(conv2)
     
-    # Residual Connection (чтобы сеть не "забыла" исходный сигнал)
+    # Residual Connection
     res_x = Add(dtype=policy)([x, conv2])
+    res_x = LayerNormalization(dtype=policy)(res_x)
+    
+    # ✂️ Раннее сжатие времени (90 дней -> 45 дней)
+    # Это снижает вычислительную нагрузку в 2 раза для всех последующих шагов
+    res_x = MaxPooling1D(pool_size=2, dtype=policy)(res_x)
     res_x = Dropout(0.2)(res_x)
-    # -----------------------------------
     
-    # Твой родной Attention и Pooling
-    attn_out = Attention(dtype=policy)([res_x, res_x])
-    x = Add(dtype=policy)([res_x, attn_out])
-    x = LayerNormalization(dtype=policy)(x)
-    
-    avg_pool = GlobalAveragePooling1D(dtype=policy)(x)
-    max_pool = GlobalMaxPooling1D(dtype=policy)(x)
+    # --- Выходной блок (без тяжелого Attention) ---
+    avg_pool = GlobalAveragePooling1D(dtype=policy)(res_x)
+    max_pool = GlobalMaxPooling1D(dtype=policy)(res_x)
     x = Concatenate(dtype=policy)([avg_pool, max_pool])
     
     x = Dense(64, kernel_regularizer=regularizers.l2(l2_reg), dtype=policy)(x)

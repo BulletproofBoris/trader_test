@@ -18,6 +18,9 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 warnings.filterwarnings('ignore')
 
+# Включаем асинхронное выделение памяти (Снижает потребление VRAM до 50%!)
+os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
+
 import tensorflow as tf
 
 # Включаем BFLOAT16 (Оптимально для серии RTX 3000/4000/5000)
@@ -28,9 +31,18 @@ print("✅ BFLOAT16 включен!")
 gpus = tf.config.list_physical_devices('GPU')
 if gpus:
     try:
-        for gpu in gpus: tf.config.experimental.set_memory_growth(gpu, True)
-        print("✅ Динамическое выделение видеопамяти включено!")
-    except RuntimeError as e: print(e)
+        # Устанавливаем лимит в мегабайтах (Например, 2800 МБ)
+        # Если у тебя 10 ГБ VRAM, 2800 МБ позволит запустить ровно 3 процесса (8.4 ГБ)
+        VRAM_LIMIT_MB = 3000 
+        
+        for gpu in gpus:
+            tf.config.set_logical_device_configuration(
+                gpu,
+                [tf.config.LogicalDeviceConfiguration(memory_limit=VRAM_LIMIT_MB)]
+            )
+        print(f"✅ Жесткий квотированный лимит VRAM: {VRAM_LIMIT_MB} МБ на процесс!")
+    except RuntimeError as e: 
+        print(e)
 
 # --- Импорты из ядра ---
 from ltsm_core.orchestrator import SmartOrchestrator
@@ -78,8 +90,14 @@ def main(args):
     # 🧠 АДАПТИВНЫЙ БАТЧ (Hardware Limit + Math Limit)
     # -------------------------------------------------------------
     num_train_samples = count_tfrecord_samples(train_record_path)
-    max_phys_batch = find_max_physical_batch(create_model, seq_len, n_features)
     
+    # 1. Спрашиваем математику: какой батч идеален, если бы памяти было бесконечно много? (передаем 999999)
+    ideal_logical, _, _ = get_adaptive_batch_config(num_train_samples, max_phys_batch=999999)
+    
+    # 2. Тестируем железо, но НЕ ВЫШЕ идеального батча!
+    max_phys_batch = find_max_physical_batch(create_model, seq_len, n_features, start_batch=ideal_logical)
+    
+    # 3. Финальный конфиг (на случай, если даже идеал не влез и нужно включить накопление градиентов)
     logical_batch, phys_batch, accum_steps = get_adaptive_batch_config(num_train_samples, max_phys_batch)
     
     print(f"\n📊 СТАТИСТИКА: {num_train_samples} тренировочных примеров.")
@@ -113,7 +131,7 @@ def main(args):
             model = create_model(seq_len, n_features, args.l2_reg)
             
             # --- Накопление градиентов ---
-            optimizer = tf.keras.optimizers.Adam(learning_rate=args.lr, clipnorm=1.0)
+            optimizer = tf.keras.optimizers.Lion(learning_rate=args.lr * 0.1, clipnorm=1.0)
             if accum_steps > 1:
                 try:
                     optimizer = tf.keras.optimizers.experimental.GradientAccumulation(optimizer, accum_steps=accum_steps)

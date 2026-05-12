@@ -85,11 +85,14 @@ class MathTrendAnalyzer:
         
         return true_c, q5_c, uncertainty, runs_needed
 
-def find_max_physical_batch(create_model_fn, seq_len, n_features, starting_batch=8192):
-    print(f"\n🔍 [Hardware Test] Ищем потолок VRAM для окна seq_len={seq_len}...")
-    batch_size = starting_batch
+def find_max_physical_batch(create_model_fn, seq_len, n_features, start_batch=8192):
+    print(f"\n🔍 [Hardware Test] Ищем потолок VRAM (Старт с батча {start_batch})...")
     
-    while batch_size >= 32:
+    # Гарантируем, что старт начнется со степени двойки
+    import math
+    batch_size = 2 ** math.floor(math.log2(start_batch))
+    
+    while batch_size >= 16:
         try:
             tf.keras.backend.clear_session()
             gc.collect()
