@@ -9,7 +9,7 @@ def main():
     parser = argparse.ArgumentParser(description="Оркестратор массового обучения LSTM (Walk-Forward)")
     parser.add_argument("--dataset_dir", type=str, default="data/processed/2000_2026_1d_6_1", help="Путь к корневой папке датасета")
     parser.add_argument("--runs", type=int, default=100, help="Количество прогонов (runs) для каждого фолда")
-    parser.add_argument("--batch_size", type=int, default=8192, help="Размер батча")
+    # Удален параметр --batch_size, так как теперь он адаптивный!
     parser.add_argument("--epochs", type=int, default=100, help="Количество эпох обучения")
     parser.add_argument("--l2_reg", type=str, default="1e-3", help="Коэффициент L2 регуляризации")
     parser.add_argument("--lr", type=str, default="8e-2", help="Стартовый Learning Rate")
@@ -28,7 +28,7 @@ def main():
     DATASET_DIR = Path(args.dataset_dir)
     print("🚀 Запуск массового обучения моделей (Walk-Forward)...")
     print(f"📁 Датасет: {DATASET_DIR}")
-    print(f"⚙️  Настройки: {args.runs} runs, {args.epochs} epochs, batch {args.batch_size}")
+    print(f"⚙️  Настройки: {args.runs} runs, {args.epochs} epochs (Батч вычисляется динамически!)")
     print(f"🧠 Эластичность: Bonus Ratio = {args.bonus_ratio}, Min Delta = {args.min_delta}")
 
     if not DATASET_DIR.exists():
@@ -60,16 +60,17 @@ def main():
             print("="*60)
             
             # Формируем базовую команду вызова
+            # Используем прямой вызов файла, чтобы точно избежать проблем с путями
+            script_path = str(Path("_tools") / "train_ltsm_model.py")
+            
             cmd = [
-                "python", "-m", "_tools.train_ltsm_model",
+                "python", script_path,
                 "--dataset_dir", str(DATASET_DIR),
                 "--fold", fold_name,
                 "--runs", str(args.runs),
-                "--batch_size", str(args.batch_size),
                 "--epochs", str(args.epochs),
                 "--l2_reg", args.l2_reg,
                 "--lr", args.lr,
-                # ПЕРЕДАЕМ НОВЫЕ ПАРАМЕТРЫ
                 "--bonus_ratio", str(args.bonus_ratio),
                 "--min_delta", str(args.min_delta)
             ]
