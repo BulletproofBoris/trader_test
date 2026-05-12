@@ -1,4 +1,5 @@
 import argparse
+import gc
 import os
 import time
 import sys
@@ -128,6 +129,7 @@ def main(args):
             orchestrator.register_run_start(run_id, Path(args.dataset_dir).name, args.fold, hyperparams)
             
             tf.keras.backend.clear_session()
+            gc.collect()
             model = create_model(seq_len, n_features, args.l2_reg)
             
             # --- Накопление градиентов ---
