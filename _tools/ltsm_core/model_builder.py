@@ -1,35 +1,34 @@
 import json
 from pathlib import Path
 import tensorflow as tf
-from tensorflow.keras.layers import (
-    Input, Dense, GRU, Bidirectional, Dropout, Attention,
-    Add, LayerNormalization, GlobalAveragePooling1D, GlobalMaxPooling1D, Concatenate, Activation
-)
+from tensorflow.keras.layers import Conv1D, BatchNormalization, Activation, Add, Input, Dense, Dropout, Attention, LayerNormalization, GlobalAveragePooling1D, GlobalMaxPooling1D, Concatenate
 from tensorflow.keras.models import Model
 from tensorflow.keras import regularizers
 
 def create_model(seq_len, n_features, l2_reg=1e-5):
-    # 1. ЖЕСТКО создаем политику BFLOAT16
     policy = tf.keras.mixed_precision.Policy('mixed_bfloat16')
-    
-    # 2. ВХОД СТРОГО БЕЗ ПОЛИТИКИ (Keras ждет float32)
     inputs = Input(shape=(seq_len, n_features), name="input_layer")
     
-    # 3. ПРОКИДЫВАЕМ ПОЛИТИКУ ВО ВСЕ СЛОИ
     x = Dense(64, activation='linear', name='fp16_projection', dtype=policy)(inputs)
     
-    x = Bidirectional(
-        GRU(64, return_sequences=True, kernel_regularizer=regularizers.l2(l2_reg), dtype=policy), 
-        dtype=policy
-    )(x)
-    x = Dropout(0.2)(x)
+    # --- СВЕРТОЧНЫЙ БЛОК (Замена GRU) ---
+    # Свертка 1
+    conv1 = Conv1D(filters=64, kernel_size=3, padding='causal', dtype=policy)(x)
+    conv1 = BatchNormalization(dtype=policy)(conv1)
+    conv1 = Activation('gelu', dtype=policy)(conv1)
+    conv1 = Dropout(0.2)(conv1)
     
-    x = Bidirectional(
-        GRU(64, return_sequences=True, kernel_regularizer=regularizers.l2(l2_reg), dtype=policy), 
-        dtype=policy
-    )(x)
-    res_x = Dropout(0.2)(x)
+    # Свертка 2 (с расширенным окном)
+    conv2 = Conv1D(filters=64, kernel_size=5, padding='causal', dilation_rate=2, dtype=policy)(conv1)
+    conv2 = BatchNormalization(dtype=policy)(conv2)
+    conv2 = Activation('gelu', dtype=policy)(conv2)
     
+    # Residual Connection (чтобы сеть не "забыла" исходный сигнал)
+    res_x = Add(dtype=policy)([x, conv2])
+    res_x = Dropout(0.2)(res_x)
+    # -----------------------------------
+    
+    # Твой родной Attention и Pooling
     attn_out = Attention(dtype=policy)([res_x, res_x])
     x = Add(dtype=policy)([res_x, attn_out])
     x = LayerNormalization(dtype=policy)(x)
@@ -42,7 +41,6 @@ def create_model(seq_len, n_features, l2_reg=1e-5):
     x = Activation('gelu', dtype=policy)(x)
     x = Dropout(0.2)(x)
     
-    # 4. ВЫХОД СТРОГО ВО FLOAT32 (Защита от математических ошибок)
     outputs = Dense(3, activation='softmax', name='out', dtype='float32')(x)
     
     return Model(inputs=inputs, outputs=outputs)

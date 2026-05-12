@@ -18,9 +18,18 @@ def load_tfrecord_dataset(file_path, batch_size, lookback, n_features, is_traini
     dataset = dataset.map(lambda x: parse_tfrecord_fn(x, lookback, n_features), num_parallel_calls=tf.data.AUTOTUNE)
     
     if is_training:
-        dataset = dataset.cache().shuffle(10000)
+        # Кешируем данные в оперативную память (если её хватает!)
+        # Если ОЗУ мало (меньше 32 ГБ), эту строчку лучше закомментировать
+        dataset = dataset.cache() 
+        dataset = dataset.shuffle(buffer_size=8192, reshuffle_each_iteration=True)
+    else:
+        dataset = dataset.cache()
         
-    dataset = dataset.batch(batch_size).prefetch(tf.data.AUTOTUNE)
+    dataset = dataset.batch(batch_size, drop_remainder=is_training)
+    
+    # Заставляем процессор готовить следующий батч, пока GPU считает текущий
+    dataset = dataset.prefetch(tf.data.AUTOTUNE) 
+    
     return dataset
 
 def compute_class_weights_fast(tfrecord_path):

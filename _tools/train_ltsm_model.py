@@ -124,7 +124,8 @@ def main(args):
             model.compile(
                 optimizer=optimizer,
                 loss=tf.keras.losses.CategoricalCrossentropy(label_smoothing=0.1),
-                metrics=['accuracy']
+                metrics=['accuracy'],
+                jit_compile=True
             )
 
             # === ПРОСТОЙ ТЕСТ MIXED PRECISION ===
