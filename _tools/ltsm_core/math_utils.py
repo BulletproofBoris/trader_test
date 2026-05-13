@@ -130,7 +130,7 @@ def find_max_physical_batch(create_model_fn, seq_len, n_features, start_batch=81
             
     raise RuntimeError("Даже батч 32 не влез в VRAM! Проверьте архитектуру сети.")
 
-def get_adaptive_batch_config(num_samples, max_phys_batch, target_steps=50): # 🚀 ЦЕЛЬ: 50 шагов
+def get_adaptive_batch_config(num_samples, max_phys_batch, target_steps=100): # 🚀 ЦЕЛЬ: 50 шагов
     # Идеальный математический батч
     ideal_batch = num_samples / target_steps
     
