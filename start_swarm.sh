@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # --- НАСТРОЙКИ ---
-CMD='python run_walkforward.py --dataset_dir "data/processed/2000_2026_1d_90_15" --bonus_ratio 0.15 --min_delta 0.001 --runs 200 --epochs 100 --l2_reg "5e-4" --lr "5e-3" --start_fold "fold_2024" --append'
+CMD='python run_walkforward.py --dataset_dir "data/processed/2000_2026_1d_90_15" --bonus_ratio 0.2 --min_delta 0.001 --runs 200 --epochs 100 --l2_reg "1e-3" --lr "1e-3" --start_fold "fold_2024" --append'
 
 # Сколько видеопамяти жрет один воркер в пике (в МБ). 
 # Ты говорил про 800 МБ, но берем с запасом на XLA кэш.
-VRAM_PER_WORKER=3000 
+VRAM_PER_WORKER=3500 
 
 # Буфер под ОС и графический интерфейс (в МБ)
 OS_BUFFER=1700 
@@ -49,7 +49,7 @@ do
     if [ $? != 0 ]; then
         echo "🚀 [Воркер $i/$MAX_WORKERS] Создаю сессию: $SESSION"
         tmux new-session -d -s "$SESSION"
-        tmux send-keys -t "$SESSION" "$CMD" C-m
+        tmux send-keys -t "$SESSION" "$CMD > ${SESSION}_log.txt 2>&1" C-m
         
         # Если это не последний воркер, делаем умную паузу
         if [ "$i" -lt "$MAX_WORKERS" ]; then

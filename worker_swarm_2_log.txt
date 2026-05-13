@@ -1,0 +1,395 @@
+🚀 Запуск массового обучения моделей (Walk-Forward)...
+📁 Датасет: data/processed/2000_2026_1d_90_15
+⚙️  Настройки: 200 runs, 100 epochs (Батч вычисляется динамически!)
+🧠 Эластичность: Bonus Ratio = 0.2, Min Delta = 0.001
+⏭️ Пропускаем завершенные фолды. Начинаем строго с: fold_2024
+
+============================================================
+🔥 Обучение нейросети для: fold_2024
+============================================================
+✅ Аппаратное ускорение TF32 включено!
+✅ Жесткий квотированный лимит VRAM: 3000 МБ на процесс!
+
+🔍 [Hardware Test] Ищем потолок VRAM (Старт с батча 2048)...
+✅ Физический предел VRAM найден: батч 2048
+
+📊 СТАТИСТИКА: 193842 тренировочных примеров.
+🎯 Идеальный (математический) батч: 2048
+🔧 Физический батч в VRAM: 2048 (Шагов накопления: x1)
+
+🚀 Старт обучения. Воркер: worker_1284742_fd3e99
+
+------------------------------------------------------------
+🔄 ИТЕРАЦИЯ 1/200 (Цель Loss < 1.0499)
+📈 Статус тренда: Прогрев воркера. В пуле: 4 процесс(ов).
+------------------------------------------------------------
+
+🧪 [Mixed Precision Check]
+Политика первого слоя (fp16_projection): float32
+Политика финального слоя (out): float32
+------------------------------
+
+📐 [Elite Pruning] Элитная цель (Асимптота): 1.0800 | Допустимый разброс: ±0.0221
+Epoch 1/100
+94/94 - 17s - 180ms/step - accuracy: 0.3512 - loss: 1.4032 - val_accuracy: 0.3788 - val_loss: 1.2034
+Epoch 2/100
+94/94 - 6s - 59ms/step - accuracy: 0.3742 - loss: 1.2068 - val_accuracy: 0.3899 - val_loss: 1.2011
+Epoch 3/100
+94/94 - 5s - 54ms/step - accuracy: 0.4221 - loss: 1.1506 - val_accuracy: 0.4024 - val_loss: 1.2087
+Epoch 4/100
+94/94 - 5s - 56ms/step - accuracy: 0.4614 - loss: 1.1178 - val_accuracy: 0.4129 - val_loss: 1.1931
+Epoch 5/100
+94/94 - 7s - 72ms/step - accuracy: 0.4927 - loss: 1.0942 - val_accuracy: 0.4185 - val_loss: 1.1654
+Epoch 6/100
+94/94 - 7s - 69ms/step - accuracy: 0.5079 - loss: 1.0755 - val_accuracy: 0.4055 - val_loss: 1.1542
+Epoch 7/100
+94/94 - 9s - 98ms/step - accuracy: 0.5201 - loss: 1.0606 - val_accuracy: 0.4099 - val_loss: 1.1593
+Epoch 8/100
+94/94 - 7s - 72ms/step - accuracy: 0.5279 - loss: 1.0488 - val_accuracy: 0.4316 - val_loss: 1.1312
+Epoch 9/100
+94/94 - 7s - 77ms/step - accuracy: 0.5372 - loss: 1.0375 - val_accuracy: 0.3994 - val_loss: 1.1794
+Epoch 10/100
+94/94 - 7s - 77ms/step - accuracy: 0.5460 - loss: 1.0267 - val_accuracy: 0.4201 - val_loss: 1.1277
+Epoch 11/100
+94/94 - 11s - 115ms/step - accuracy: 0.5518 - loss: 1.0174 - val_accuracy: 0.4062 - val_loss: 1.1396
+Epoch 12/100
+94/94 - 7s - 76ms/step - accuracy: 0.5590 - loss: 1.0067 - val_accuracy: 0.4067 - val_loss: 1.1376
+Epoch 13/100
+94/94 - 7s - 76ms/step - accuracy: 0.5673 - loss: 0.9982 - val_accuracy: 0.3944 - val_loss: 1.1412
+Epoch 14/100
+94/94 - 7s - 77ms/step - accuracy: 0.5721 - loss: 0.9921 - val_accuracy: 0.4079 - val_loss: 1.1706
+Epoch 15/100
+
+📉 [Backtrack] Откат к ЛУЧШИМ весам. Новый LR: 0.0007000000332482159
+94/94 - 7s - 79ms/step - accuracy: 0.5773 - loss: 0.9841 - val_accuracy: 0.3817 - val_loss: 1.1624
+Epoch 16/100
+94/94 - 11s - 114ms/step - accuracy: 0.5540 - loss: 1.0169 - val_accuracy: 0.4089 - val_loss: 1.1411
+Epoch 17/100
+94/94 - 7s - 77ms/step - accuracy: 0.5604 - loss: 1.0095 - val_accuracy: 0.4045 - val_loss: 1.1393
+Epoch 18/100
+94/94 - 7s - 77ms/step - accuracy: 0.5682 - loss: 1.0005 - val_accuracy: 0.4123 - val_loss: 1.1365
+Epoch 19/100
+94/94 - 7s - 77ms/step - accuracy: 0.5723 - loss: 0.9950 - val_accuracy: 0.4020 - val_loss: 1.1439
+Epoch 20/100
+
+📉 [Backtrack] Откат к ЛУЧШИМ весам. Новый LR: 0.0007000000332482159
+
+🔪 [Elite Z-Score] Нет улучшений 10 эпох. ЛУЧШИЙ Loss 1.1277 вылетел из элитного коридора (Z=2.16 > 2.0). Итерация убита.
+94/94 - 11s - 113ms/step - accuracy: 0.5777 - loss: 0.9882 - val_accuracy: 0.4068 - val_loss: 1.1518
+
+------------------------------------------------------------
+🔄 ИТЕРАЦИЯ 2/200 (Цель Loss < 1.0499)
+📈 Статус тренда: Сбор статистики пулом (7/15)...
+------------------------------------------------------------
+
+🧪 [Mixed Precision Check]
+Политика первого слоя (fp16_projection): float32
+Политика финального слоя (out): float32
+------------------------------
+
+📐 [Elite Pruning] Элитная цель (Асимптота): 1.0800 | Допустимый разброс: ±0.0221
+Epoch 1/100
+94/94 - 13s - 139ms/step - accuracy: 0.3659 - loss: 1.4635 - val_accuracy: 0.2987 - val_loss: 1.2885
+Epoch 2/100
+94/94 - 7s - 77ms/step - accuracy: 0.4011 - loss: 1.2205 - val_accuracy: 0.4092 - val_loss: 1.2140
+Epoch 3/100
+94/94 - 11s - 114ms/step - accuracy: 0.4449 - loss: 1.1582 - val_accuracy: 0.4201 - val_loss: 1.2011
+Epoch 4/100
+94/94 - 7s - 78ms/step - accuracy: 0.4898 - loss: 1.1257 - val_accuracy: 0.4246 - val_loss: 1.1937
+Epoch 5/100
+94/94 - 7s - 80ms/step - accuracy: 0.5105 - loss: 1.1029 - val_accuracy: 0.4230 - val_loss: 1.1738
+Epoch 6/100
+94/94 - 8s - 81ms/step - accuracy: 0.5233 - loss: 1.0851 - val_accuracy: 0.4192 - val_loss: 1.1608
+Epoch 7/100
+94/94 - 7s - 80ms/step - accuracy: 0.5336 - loss: 1.0701 - val_accuracy: 0.4170 - val_loss: 1.1292
+Epoch 8/100
+94/94 - 11s - 117ms/step - accuracy: 0.5394 - loss: 1.0573 - val_accuracy: 0.4153 - val_loss: 1.1220
+Epoch 9/100
+94/94 - 7s - 79ms/step - accuracy: 0.5474 - loss: 1.0465 - val_accuracy: 0.4160 - val_loss: 1.1092
+Epoch 10/100
+94/94 - 7s - 77ms/step - accuracy: 0.5518 - loss: 1.0362 - val_accuracy: 0.4230 - val_loss: 1.1106
+Epoch 11/100
+94/94 - 7s - 79ms/step - accuracy: 0.5581 - loss: 1.0261 - val_accuracy: 0.4147 - val_loss: 1.1174
+Epoch 12/100
+94/94 - 11s - 116ms/step - accuracy: 0.5619 - loss: 1.0181 - val_accuracy: 0.4342 - val_loss: 1.1024
+Epoch 13/100
+94/94 - 7s - 78ms/step - accuracy: 0.5637 - loss: 1.0095 - val_accuracy: 0.4286 - val_loss: 1.1174
+Epoch 14/100
+94/94 - 7s - 79ms/step - accuracy: 0.5675 - loss: 1.0011 - val_accuracy: 0.4147 - val_loss: 1.1533
+Epoch 15/100
+94/94 - 7s - 73ms/step - accuracy: 0.5743 - loss: 0.9925 - val_accuracy: 0.4051 - val_loss: 1.2012
+Epoch 16/100
+94/94 - 7s - 70ms/step - accuracy: 0.5773 - loss: 0.9834 - val_accuracy: 0.4051 - val_loss: 1.2081
+Epoch 17/100
+
+📉 [Backtrack] Откат к ЛУЧШИМ весам. Новый LR: 0.0007000000332482159
+94/94 - 11s - 117ms/step - accuracy: 0.5792 - loss: 0.9766 - val_accuracy: 0.3930 - val_loss: 1.2422
+Epoch 18/100
+94/94 - 7s - 78ms/step - accuracy: 0.5658 - loss: 1.0080 - val_accuracy: 0.4255 - val_loss: 1.1199
+Epoch 19/100
+94/94 - 7s - 78ms/step - accuracy: 0.5692 - loss: 1.0017 - val_accuracy: 0.4237 - val_loss: 1.1449
+Epoch 20/100
+94/94 - 7s - 78ms/step - accuracy: 0.5724 - loss: 0.9947 - val_accuracy: 0.4255 - val_loss: 1.1775
+Epoch 21/100
+94/94 - 11s - 117ms/step - accuracy: 0.5748 - loss: 0.9873 - val_accuracy: 0.4125 - val_loss: 1.1901
+Epoch 22/100
+
+📉 [Backtrack] Откат к ЛУЧШИМ весам. Новый LR: 0.0007000000332482159
+94/94 - 8s - 80ms/step - accuracy: 0.5781 - loss: 0.9805 - val_accuracy: 0.4090 - val_loss: 1.2154
+Epoch 23/100
+94/94 - 7s - 78ms/step - accuracy: 0.5662 - loss: 1.0098 - val_accuracy: 0.4381 - val_loss: 1.1149
+Epoch 24/100
+94/94 - 7s - 78ms/step - accuracy: 0.5681 - loss: 1.0029 - val_accuracy: 0.4308 - val_loss: 1.1343
+Epoch 25/100
+94/94 - 11s - 117ms/step - accuracy: 0.5712 - loss: 0.9953 - val_accuracy: 0.4247 - val_loss: 1.1730
+Epoch 26/100
+94/94 - 7s - 79ms/step - accuracy: 0.5754 - loss: 0.9875 - val_accuracy: 0.4205 - val_loss: 1.1989
+Epoch 27/100
+
+🛑 Лимит откатов LR исчерпан.
+94/94 - 7s - 78ms/step - accuracy: 0.5797 - loss: 0.9805 - val_accuracy: 0.4226 - val_loss: 1.1766
+
+🎯 Итог итерации 2: Val Loss = 1.1024 | Val Acc = 43.42%
+
+------------------------------------------------------------
+🔄 ИТЕРАЦИЯ 3/200 (Цель Loss < 1.0499)
+📈 Статус тренда: Сбор статистики пулом (8/15)...
+------------------------------------------------------------
+
+🧪 [Mixed Precision Check]
+Политика первого слоя (fp16_projection): float32
+Политика финального слоя (out): float32
+------------------------------
+
+📐 [Elite Pruning] Элитная цель (Асимптота): 1.0791 | Допустимый разброс: ±0.0209
+Epoch 1/100
+94/94 - 10s - 106ms/step - accuracy: 0.3641 - loss: 1.3769 - val_accuracy: 0.4518 - val_loss: 1.1705
+Epoch 2/100
+94/94 - 11s - 118ms/step - accuracy: 0.4022 - loss: 1.1993 - val_accuracy: 0.4612 - val_loss: 1.1577
+Epoch 3/100
+94/94 - 7s - 79ms/step - accuracy: 0.4632 - loss: 1.1477 - val_accuracy: 0.4482 - val_loss: 1.1445
+Epoch 4/100
+94/94 - 7s - 79ms/step - accuracy: 0.4918 - loss: 1.1157 - val_accuracy: 0.4502 - val_loss: 1.1337
+Epoch 5/100
+94/94 - 7s - 80ms/step - accuracy: 0.5086 - loss: 1.0949 - val_accuracy: 0.4832 - val_loss: 1.1141
+Epoch 6/100
+94/94 - 11s - 118ms/step - accuracy: 0.5221 - loss: 1.0775 - val_accuracy: 0.4720 - val_loss: 1.1050
+Epoch 7/100
+94/94 - 7s - 79ms/step - accuracy: 0.5273 - loss: 1.0641 - val_accuracy: 0.4576 - val_loss: 1.1027
+Epoch 8/100
+94/94 - 8s - 81ms/step - accuracy: 0.5347 - loss: 1.0524 - val_accuracy: 0.4507 - val_loss: 1.1024
+Epoch 9/100
+94/94 - 6s - 61ms/step - accuracy: 0.5436 - loss: 1.0415 - val_accuracy: 0.4229 - val_loss: 1.1115
+Epoch 10/100
+94/94 - 7s - 77ms/step - accuracy: 0.5493 - loss: 1.0318 - val_accuracy: 0.4150 - val_loss: 1.1181
+Epoch 11/100
+94/94 - 11s - 117ms/step - accuracy: 0.5572 - loss: 1.0217 - val_accuracy: 0.3712 - val_loss: 1.1325
+Epoch 12/100
+94/94 - 7s - 79ms/step - accuracy: 0.5665 - loss: 1.0101 - val_accuracy: 0.3678 - val_loss: 1.1543
+Epoch 13/100
+
+📉 [Backtrack] Откат к ЛУЧШИМ весам. Новый LR: 0.0007000000332482159
+94/94 - 8s - 81ms/step - accuracy: 0.5721 - loss: 1.0001 - val_accuracy: 0.3435 - val_loss: 1.1833
+Epoch 14/100
+94/94 - 7s - 79ms/step - accuracy: 0.5408 - loss: 1.0430 - val_accuracy: 0.4348 - val_loss: 1.1131
+Epoch 15/100
+94/94 - 11s - 116ms/step - accuracy: 0.5462 - loss: 1.0351 - val_accuracy: 0.4132 - val_loss: 1.1150
+Epoch 16/100
+94/94 - 7s - 78ms/step - accuracy: 0.5512 - loss: 1.0273 - val_accuracy: 0.3734 - val_loss: 1.1277
+Epoch 17/100
+94/94 - 6s - 68ms/step - accuracy: 0.5588 - loss: 1.0189 - val_accuracy: 0.3761 - val_loss: 1.1412
+Epoch 18/100
+
+📉 [Backtrack] Откат к ЛУЧШИМ весам. Новый LR: 0.0007000000332482159
+94/94 - 8s - 82ms/step - accuracy: 0.5641 - loss: 1.0103 - val_accuracy: 0.3578 - val_loss: 1.1517
+Epoch 19/100
+94/94 - 7s - 79ms/step - accuracy: 0.5407 - loss: 1.0429 - val_accuracy: 0.4484 - val_loss: 1.0994
+Epoch 20/100
+94/94 - 11s - 116ms/step - accuracy: 0.5479 - loss: 1.0344 - val_accuracy: 0.4073 - val_loss: 1.1236
+Epoch 21/100
+94/94 - 8s - 80ms/step - accuracy: 0.5514 - loss: 1.0274 - val_accuracy: 0.3895 - val_loss: 1.1258
+Epoch 22/100
+94/94 - 7s - 78ms/step - accuracy: 0.5586 - loss: 1.0181 - val_accuracy: 0.3661 - val_loss: 1.1477
+Epoch 23/100
+94/94 - 7s - 80ms/step - accuracy: 0.5655 - loss: 1.0105 - val_accuracy: 0.3644 - val_loss: 1.1554
+Epoch 24/100
+
+📉 [Backtrack] Откат к ЛУЧШИМ весам. Новый LR: 0.0004900000232737511
+94/94 - 11s - 117ms/step - accuracy: 0.5706 - loss: 1.0013 - val_accuracy: 0.3675 - val_loss: 1.1601
+Epoch 25/100
+94/94 - 7s - 79ms/step - accuracy: 0.5467 - loss: 1.0354 - val_accuracy: 0.4246 - val_loss: 1.1090
+Epoch 26/100
+94/94 - 7s - 79ms/step - accuracy: 0.5510 - loss: 1.0296 - val_accuracy: 0.3970 - val_loss: 1.1210
+Epoch 27/100
+94/94 - 7s - 78ms/step - accuracy: 0.5574 - loss: 1.0229 - val_accuracy: 0.3907 - val_loss: 1.1254
+Epoch 28/100
+94/94 - 11s - 116ms/step - accuracy: 0.5616 - loss: 1.0161 - val_accuracy: 0.3843 - val_loss: 1.1327
+Epoch 29/100
+
+📉 [Backtrack] Откат к ЛУЧШИМ весам. Новый LR: 0.0004900000232737511
+94/94 - 6s - 69ms/step - accuracy: 0.5683 - loss: 1.0094 - val_accuracy: 0.3686 - val_loss: 1.1459
+Epoch 30/100
+94/94 - 7s - 76ms/step - accuracy: 0.5471 - loss: 1.0347 - val_accuracy: 0.4311 - val_loss: 1.1043
+Epoch 31/100
+94/94 - 7s - 76ms/step - accuracy: 0.5534 - loss: 1.0291 - val_accuracy: 0.4041 - val_loss: 1.1193
+Epoch 32/100
+94/94 - 7s - 72ms/step - accuracy: 0.5564 - loss: 1.0236 - val_accuracy: 0.3934 - val_loss: 1.1307
+Epoch 33/100
+94/94 - 10s - 110ms/step - accuracy: 0.5601 - loss: 1.0168 - val_accuracy: 0.3821 - val_loss: 1.1370
+Epoch 34/100
+
+🛑 Лимит откатов LR исчерпан.
+94/94 - 7s - 76ms/step - accuracy: 0.5674 - loss: 1.0092 - val_accuracy: 0.3765 - val_loss: 1.1405
+
+🎯 Итог итерации 3: Val Loss = 1.0994 | Val Acc = 44.84%
+
+------------------------------------------------------------
+🔄 ИТЕРАЦИЯ 4/200 (Цель Loss < 1.0499)
+📈 Статус тренда: Сбор статистики пулом (12/15)...
+------------------------------------------------------------
+
+🧪 [Mixed Precision Check]
+Политика первого слоя (fp16_projection): float32
+Политика финального слоя (out): float32
+------------------------------
+
+📐 [Elite Pruning] Элитная цель (Асимптота): 1.0815 | Допустимый разброс: ±0.0202
+Epoch 1/100
+94/94 - 10s - 106ms/step - accuracy: 0.3806 - loss: 1.3916 - val_accuracy: 0.4142 - val_loss: 1.1800
+Epoch 2/100
+94/94 - 7s - 71ms/step - accuracy: 0.4122 - loss: 1.1962 - val_accuracy: 0.4299 - val_loss: 1.1784
+Epoch 3/100
+94/94 - 11s - 113ms/step - accuracy: 0.4601 - loss: 1.1501 - val_accuracy: 0.4386 - val_loss: 1.1542
+Epoch 4/100
+94/94 - 7s - 79ms/step - accuracy: 0.4950 - loss: 1.1204 - val_accuracy: 0.4484 - val_loss: 1.1458
+Epoch 5/100
+94/94 - 7s - 78ms/step - accuracy: 0.5136 - loss: 1.0977 - val_accuracy: 0.4484 - val_loss: 1.1369
+Epoch 6/100
+94/94 - 7s - 78ms/step - accuracy: 0.5212 - loss: 1.0803 - val_accuracy: 0.4521 - val_loss: 1.1299
+Epoch 7/100
+94/94 - 7s - 78ms/step - accuracy: 0.5239 - loss: 1.0665 - val_accuracy: 0.4555 - val_loss: 1.1139
+Epoch 8/100
+94/94 - 11s - 116ms/step - accuracy: 0.5245 - loss: 1.0553 - val_accuracy: 0.4601 - val_loss: 1.0948
+Epoch 9/100
+94/94 - 7s - 78ms/step - accuracy: 0.5307 - loss: 1.0460 - val_accuracy: 0.4510 - val_loss: 1.0917
+Epoch 10/100
+94/94 - 7s - 78ms/step - accuracy: 0.5396 - loss: 1.0374 - val_accuracy: 0.4579 - val_loss: 1.0906
+Epoch 11/100
+94/94 - 7s - 79ms/step - accuracy: 0.5452 - loss: 1.0278 - val_accuracy: 0.4511 - val_loss: 1.0946
+Epoch 12/100
+94/94 - 11s - 115ms/step - accuracy: 0.5515 - loss: 1.0192 - val_accuracy: 0.3955 - val_loss: 1.1227
+Epoch 13/100
+94/94 - 7s - 77ms/step - accuracy: 0.5580 - loss: 1.0105 - val_accuracy: 0.3888 - val_loss: 1.1344
+Epoch 14/100
+94/94 - 7s - 77ms/step - accuracy: 0.5653 - loss: 1.0004 - val_accuracy: 0.3390 - val_loss: 1.2044
+Epoch 15/100
+
+📉 [Backtrack] Откат к ЛУЧШИМ весам. Новый LR: 0.0007000000332482159
+94/94 - 7s - 79ms/step - accuracy: 0.5727 - loss: 0.9888 - val_accuracy: 0.3201 - val_loss: 1.2488
+Epoch 16/100
+94/94 - 11s - 115ms/step - accuracy: 0.5443 - loss: 1.0291 - val_accuracy: 0.4446 - val_loss: 1.0948
+Epoch 17/100
+94/94 - 7s - 77ms/step - accuracy: 0.5527 - loss: 1.0218 - val_accuracy: 0.4095 - val_loss: 1.1260
+Epoch 18/100
+94/94 - 6s - 65ms/step - accuracy: 0.5559 - loss: 1.0148 - val_accuracy: 0.3861 - val_loss: 1.1411
+Epoch 19/100
+94/94 - 6s - 64ms/step - accuracy: 0.5622 - loss: 1.0068 - val_accuracy: 0.3975 - val_loss: 1.1269
+Epoch 20/100
+
+📉 [Backtrack] Откат к ЛУЧШИМ весам. Новый LR: 0.0007000000332482159
+94/94 - 7s - 78ms/step - accuracy: 0.5679 - loss: 0.9979 - val_accuracy: 0.3627 - val_loss: 1.1589
+Epoch 21/100
+94/94 - 11s - 116ms/step - accuracy: 0.5451 - loss: 1.0286 - val_accuracy: 0.4371 - val_loss: 1.0959
+Epoch 22/100
+94/94 - 7s - 78ms/step - accuracy: 0.5490 - loss: 1.0217 - val_accuracy: 0.4005 - val_loss: 1.1161
+Epoch 23/100
+94/94 - 7s - 77ms/step - accuracy: 0.5559 - loss: 1.0150 - val_accuracy: 0.4191 - val_loss: 1.1174
+Epoch 24/100
+94/94 - 7s - 77ms/step - accuracy: 0.5615 - loss: 1.0072 - val_accuracy: 0.3729 - val_loss: 1.1554
+Epoch 25/100
+
+🛑 Лимит откатов LR исчерпан.
+94/94 - 7s - 77ms/step - accuracy: 0.5681 - loss: 0.9988 - val_accuracy: 0.3428 - val_loss: 1.2036
+
+🎯 Итог итерации 4: Val Loss = 1.0906 | Val Acc = 45.79%
+
+------------------------------------------------------------
+🔄 ИТЕРАЦИЯ 5/200 (Цель Loss < 1.0499)
+📈 Статус тренда: Сбор статистики пулом (14/15)...
+------------------------------------------------------------
+
+🧪 [Mixed Precision Check]
+Политика первого слоя (fp16_projection): float32
+Политика финального слоя (out): float32
+------------------------------
+
+📐 [Elite Pruning] Элитная цель (Асимптота): 1.0798 | Допустимый разброс: ±0.0188
+Epoch 1/100
+94/94 - 10s - 106ms/step - accuracy: 0.3773 - loss: 1.4556 - val_accuracy: 0.4634 - val_loss: 1.1764
+Epoch 2/100
+94/94 - 7s - 78ms/step - accuracy: 0.4415 - loss: 1.2153 - val_accuracy: 0.4681 - val_loss: 1.1562
+Epoch 3/100
+94/94 - 7s - 78ms/step - accuracy: 0.4882 - loss: 1.1554 - val_accuracy: 0.4682 - val_loss: 1.1462
+Epoch 4/100
+94/94 - 10s - 106ms/step - accuracy: 0.5132 - loss: 1.1228 - val_accuracy: 0.4726 - val_loss: 1.1340
+Epoch 5/100
+94/94 - 7s - 78ms/step - accuracy: 0.5275 - loss: 1.1008 - val_accuracy: 0.4688 - val_loss: 1.1261
+Epoch 6/100
+94/94 - 8s - 80ms/step - accuracy: 0.5362 - loss: 1.0822 - val_accuracy: 0.4615 - val_loss: 1.1218
+Epoch 7/100
+94/94 - 5s - 57ms/step - accuracy: 0.5419 - loss: 1.0685 - val_accuracy: 0.4649 - val_loss: 1.1108
+Epoch 8/100
+94/94 - 5s - 51ms/step - accuracy: 0.5459 - loss: 1.0558 - val_accuracy: 0.4696 - val_loss: 1.1094
+Epoch 9/100
+94/94 - 4s - 39ms/step - accuracy: 0.5512 - loss: 1.0444 - val_accuracy: 0.4685 - val_loss: 1.1037
+Epoch 10/100
+94/94 - 9s - 90ms/step - accuracy: 0.5577 - loss: 1.0321 - val_accuracy: 0.4564 - val_loss: 1.1081
+Epoch 11/100
+94/94 - 5s - 54ms/step - accuracy: 0.5649 - loss: 1.0220 - val_accuracy: 0.4434 - val_loss: 1.1316
+Epoch 12/100
+94/94 - 5s - 56ms/step - accuracy: 0.5726 - loss: 1.0105 - val_accuracy: 0.4395 - val_loss: 1.1563
+Epoch 13/100
+94/94 - 5s - 56ms/step - accuracy: 0.5738 - loss: 1.0018 - val_accuracy: 0.4258 - val_loss: 1.1968
+Epoch 14/100
+
+📉 [Backtrack] Откат к ЛУЧШИМ весам. Новый LR: 0.0007000000332482159
+94/94 - 5s - 56ms/step - accuracy: 0.5771 - loss: 0.9924 - val_accuracy: 0.4167 - val_loss: 1.1837
+Epoch 15/100
+94/94 - 5s - 56ms/step - accuracy: 0.5593 - loss: 1.0336 - val_accuracy: 0.4724 - val_loss: 1.1039
+Epoch 16/100
+94/94 - 9s - 96ms/step - accuracy: 0.5641 - loss: 1.0250 - val_accuracy: 0.4560 - val_loss: 1.1149
+Epoch 17/100
+94/94 - 5s - 57ms/step - accuracy: 0.5683 - loss: 1.0169 - val_accuracy: 0.4514 - val_loss: 1.1246
+Epoch 18/100
+94/94 - 5s - 57ms/step - accuracy: 0.5716 - loss: 1.0092 - val_accuracy: 0.4501 - val_loss: 1.1341
+Epoch 19/100
+
+📉 [Backtrack] Откат к ЛУЧШИМ весам. Новый LR: 0.0007000000332482159
+94/94 - 6s - 59ms/step - accuracy: 0.5779 - loss: 0.9999 - val_accuracy: 0.4467 - val_loss: 1.1502
+Epoch 20/100
+94/94 - 5s - 57ms/step - accuracy: 0.5571 - loss: 1.0339 - val_accuracy: 0.4582 - val_loss: 1.1103
+Epoch 21/100
+94/94 - 6s - 59ms/step - accuracy: 0.5639 - loss: 1.0254 - val_accuracy: 0.4749 - val_loss: 1.1054
+Epoch 22/100
+94/94 - 9s - 96ms/step - accuracy: 0.5670 - loss: 1.0172 - val_accuracy: 0.4542 - val_loss: 1.1233
+Epoch 23/100
+94/94 - 5s - 57ms/step - accuracy: 0.5755 - loss: 1.0080 - val_accuracy: 0.4378 - val_loss: 1.1413
+Epoch 24/100
+
+🛑 Лимит откатов LR исчерпан.
+94/94 - 5s - 55ms/step - accuracy: 0.5775 - loss: 1.0009 - val_accuracy: 0.4436 - val_loss: 1.1351
+
+🎯 Итог итерации 5: Val Loss = 1.1037 | Val Acc = 46.85%
+
+------------------------------------------------------------
+🔄 ИТЕРАЦИЯ 6/200 (Цель Loss < 1.0499)
+📈 Статус тренда: Неопределенность высокая (0.04106).
+------------------------------------------------------------
+
+🧪 [Mixed Precision Check]
+Политика первого слоя (fp16_projection): float32
+Политика финального слоя (out): float32
+------------------------------
+
+📐 [Elite Pruning] Элитная цель (Асимптота): 1.0826 | Допустимый разброс: ±0.0191
+Epoch 1/100

@@ -25,8 +25,12 @@ os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
 import tensorflow as tf
 
 # Включаем BFLOAT16 (Оптимально для серии RTX 3000/4000/5000)
-tf.keras.mixed_precision.set_global_policy('mixed_bfloat16')
-print("✅ BFLOAT16 включен!")
+#tf.keras.mixed_precision.set_global_policy('mixed_bfloat16')
+#print("✅ BFLOAT16 включен!")
+
+# Форсируем включение аппаратного TF32 для тензорных ядер (на всякий случай)
+tf.config.experimental.enable_tensor_float_32_execution(True)
+print("✅ Аппаратное ускорение TF32 включено!")
 
 # Включаем Memory Growth
 gpus = tf.config.list_physical_devices('GPU')
@@ -133,7 +137,7 @@ def main(args):
             model = create_model(seq_len, n_features, args.l2_reg)
             
             # --- Накопление градиентов ---
-            optimizer = tf.keras.optimizers.Lion(learning_rate=args.lr * 0.1, clipnorm=1.0)
+            optimizer = tf.keras.optimizers.Adam(learning_rate=args.lr, clipvalue=0.5)
             if accum_steps > 1:
                 try:
                     optimizer = tf.keras.optimizers.experimental.GradientAccumulation(optimizer, accum_steps=accum_steps)
@@ -160,7 +164,7 @@ def main(args):
             
             callbacks = [
                 ModelCheckpoint(filepath=temp_weights_path, save_weights_only=True, monitor='val_loss', mode='min', save_best_only=True, verbose=0),
-                SmartBacktrackCallback(best_weights_path=temp_weights_path, monitor_loss='val_loss', factor=0.7, patience=8, min_lr=1e-5),
+                SmartBacktrackCallback(best_weights_path=temp_weights_path, monitor_loss='val_loss', factor=0.7, patience=5, min_lr=1e-5),
                 tf.keras.callbacks.TerminateOnNaN(),
                 profiler
             ]
