@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- НАСТРОЙКИ ---
-CMD='python run_walkforward.py --dataset_dir "data/processed/2000_2026_1d_90_15" --bonus_ratio 0.15 --min_delta 0.001 --runs 100 --epochs 100 --l2_reg "1e-3" --lr "5e-2" --start_fold "fold_2024" --append'
+CMD='python run_walkforward.py --dataset_dir "data/processed/2000_2026_1d_90_15" --bonus_ratio 0.15 --min_delta 0.001 --runs 100 --epochs 100 --l2_reg "1e-3" --lr "2e-2" --start_fold "fold_2024" --append'
 
 # Сколько видеопамяти жрет один воркер в пике (в МБ). 
 # Ты говорил про 800 МБ, но берем с запасом на XLA кэш.
