@@ -1,18 +1,16 @@
 #!/bin/bash
 
 # --- НАСТРОЙКИ ---
-CMD='python run_walkforward.py --dataset_dir "data/processed/2000_2026_1d_90_15" --bonus_ratio 0.2 --min_delta 0.001 --runs 200 --epochs 100 --l2_reg "1e-3" --lr "1e-3" --start_fold "fold_2024" --append'
+CMD='python run_walkforward.py --dataset_dir "data/processed/2000_2026_1d_90_15" --bonus_ratio 0.2 --runs 200 --epochs 100 --l2_reg "1e-5" --lr "2e-3" --start_fold "fold_2024" --append'
 
-# Сколько видеопамяти жрет один воркер в пике (в МБ). 
-# Ты говорил про 800 МБ, но берем с запасом на XLA кэш.
-VRAM_PER_WORKER=3500 
+VRAM_PER_WORKER=3000 
 
 # Буфер под ОС и графический интерфейс (в МБ)
 OS_BUFFER=1700 
 
 # Пауза между запусками (в секундах). 
 # Дает первому процессу время скомпилировать XLA и уйти в быстрые эпохи.
-STAGGER_DELAY=20 
+STAGGER_DELAY=5 
 # -----------------
 
 echo "🔍 Анализирую ресурсы GPU..."

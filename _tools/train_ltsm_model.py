@@ -36,9 +36,7 @@ print("✅ Аппаратное ускорение TF32 включено!")
 gpus = tf.config.list_physical_devices('GPU')
 if gpus:
     try:
-        # Устанавливаем лимит в мегабайтах (Например, 2800 МБ)
-        # Если у тебя 10 ГБ VRAM, 2800 МБ позволит запустить ровно 3 процесса (8.4 ГБ)
-        VRAM_LIMIT_MB = 3000 
+        VRAM_LIMIT_MB = 4000 
         
         for gpu in gpus:
             tf.config.set_logical_device_configuration(
@@ -152,19 +150,17 @@ def main(args):
                 jit_compile=True
             )
 
-            # === ПРОСТОЙ ТЕСТ MIXED PRECISION ===
-            print(f"\n🧪 [Mixed Precision Check]")
-            print(f"Политика первого слоя (fp16_projection): {model.get_layer('fp16_projection').compute_dtype}")
-            print(f"Политика финального слоя (out): {model.get_layer('out').compute_dtype}")
-            print("-" * 30 + "\n")
-            # ==============================
-
+            #print(f"\n🧪 [Mixed Precision Check]")
+            #print(f"Политика первого слоя (fp16_projection): {model.get_layer('fp16_projection').compute_dtype}")
+            #print(f"Политика финального слоя (out): {model.get_layer('out').compute_dtype}")
+            #print("-" * 30 + "\n")
+            
             temp_weights_path = MODELS_DIR / f"temp_best_{run_id}.weights.h5"
             profiler = ElasticPatienceProfiler(orchestrator, args.fold, args.epochs, args.bonus_ratio, args.min_delta)
             
             callbacks = [
                 ModelCheckpoint(filepath=temp_weights_path, save_weights_only=True, monitor='val_loss', mode='min', save_best_only=True, verbose=0),
-                SmartBacktrackCallback(best_weights_path=temp_weights_path, monitor_loss='val_loss', factor=0.7, patience=5, min_lr=1e-5),
+                SmartBacktrackCallback(best_weights_path=temp_weights_path, monitor_loss='val_loss', factor=0.5, patience=3, min_lr=1e-6),
                 tf.keras.callbacks.TerminateOnNaN(),
                 profiler
             ]
