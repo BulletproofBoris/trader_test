@@ -160,7 +160,7 @@ def main(args):
             
             callbacks = [
                 ModelCheckpoint(filepath=temp_weights_path, save_weights_only=True, monitor='val_loss', mode='min', save_best_only=True, verbose=0),
-                SmartBacktrackCallback(best_weights_path=temp_weights_path, monitor_loss='val_loss', factor=0.5, patience=3, min_lr=1e-6),
+                SmartBacktrackCallback(best_weights_path=temp_weights_path, monitor_loss='val_loss', factor=0.5, patience=3, min_lr=1e-5),
                 tf.keras.callbacks.TerminateOnNaN(),
                 profiler
             ]

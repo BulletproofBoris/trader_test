@@ -27,9 +27,9 @@ def main():
         folds = sorted([d for d in dataset_dir.glob("fold_*") if d.is_dir()])
         if not folds: continue
 
-        print("\n" + "#"*80)
+        print("\n" + "="*80)
         print(f"🚀 ДАТАСЕТ: {dataset_dir.name}")
-        print("#"*80)
+        print("="*80)
 
         for fold_dir in folds:
             models_dir = fold_dir / "models"
@@ -37,7 +37,7 @@ def main():
 
             print(f"\n📂 Фолд: {fold_dir.name}")
             
-            # 1. ЖЕСТКАЯ ОЧИСТКА ВРЕМЕННОГО МУСОРА
+            # 1. ОЧИСТКА ВРЕМЕННОГО МУСОРА
             temp_files = []
             for f in models_dir.iterdir():
                 is_trash = False
@@ -65,28 +65,34 @@ def main():
             if temp_files:
                 print(f"   🧹 Удалено системного мусора: {len(temp_files)} файлов")
 
-            # 2. АНАЛИЗ И ФИЛЬТРАЦИЯ МОДЕЛЕЙ (ЧЕРЕЗ JSON)
+            # 2. АНАЛИЗ И ФИЛЬТРАЦИЯ МОДЕЛЕЙ
             keras_files = list(models_dir.glob("*.keras"))
             valid_models = []
 
             for m_file in keras_files:
                 if m_file in temp_files: continue
                 
+                # И старый, и новый формат используют одинаковое расширение .json
                 json_file = m_file.with_suffix(".json")
+                
                 val_loss = float('inf')
                 val_acc = 0.0
                 run_id = "?"
                 
-                # Читаем характеристики из JSON
                 if json_file.exists():
                     try:
-                        with open(json_file, 'r') as jf:
+                        with open(json_file, 'r', encoding='utf-8') as jf:
                             meta = json.load(jf)
-                            # Аккуратно достаем метрики, если они есть
-                            v_loss = meta.get("metrics", {}).get("val_loss")
-                            val_loss = float(v_loss) if v_loss is not None else float('inf')
-                            v_acc = meta.get("metrics", {}).get("val_acc")
-                            val_acc = float(v_acc) if v_acc is not None else 0.0
+                            
+                            # Так как и в старом, и в новом формате метрики лежат в "metrics",
+                            # мы универсально читаем их оттуда!
+                            if "metrics" in meta:
+                                v_loss = meta["metrics"].get("val_loss")
+                                v_acc = meta["metrics"].get("val_acc")
+                                
+                                val_loss = float(v_loss) if v_loss is not None else float('inf')
+                                val_acc = float(v_acc) if v_acc is not None else 0.0
+                            
                             run_id = meta.get("run_id", "?")
                     except Exception:
                         pass
@@ -99,7 +105,7 @@ def main():
                     "run": run_id
                 })
 
-            # Сортируем по Loss (от лучшего к худшему)
+            # Сортируем строго по val_loss (чем меньше, тем лучше)
             valid_models.sort(key=lambda x: x["loss"])
 
             elites = valid_models[:args.keep]
@@ -110,24 +116,23 @@ def main():
                 for bad in trash:
                     try:
                         bad["path"].unlink()
-                        if bad["json"].exists(): bad["json"].unlink()
+                        if bad["json"].exists(): 
+                            bad["json"].unlink()
                         grand_total_deleted += 1
                     except Exception: pass
                 print(f"   🗑️  Списано слабых моделей: {len(trash)}")
 
-            # Выводим оставшиеся (Элиту)
+            # Выводим Топ-3
             if elites:
-                print("   💎 Оставшиеся в строю (Топ по Loss):")
+                print("   💎 Элита фолда (Топ по Loss):")
                 for i, elite in enumerate(elites, 1):
                     loss_str = f"{elite['loss']:.4f}" if elite['loss'] != float('inf') else "N/A"
                     acc_str = f"{elite['acc']:.2f}%"
-                    run_str = f"Run {elite['run']:>2}"
-                    print(f"      {i}. {run_str} | Loss: {loss_str} | Acc: {acc_str} | Файл: {elite['path'].name}")
+                    print(f"      {i}. Run: {elite['run']:<10} | Loss: {loss_str} | Acc: {acc_str} | Файл: {elite['path'].name}")
                 grand_total_kept += len(elites)
             else:
                 print("   ⚠️ Моделей не найдено.")
 
-    # 3. ФИНАЛЬНЫЙ СВОДНЫЙ ОТЧЕТ
     print("\n" + "="*80)
     print("🏁 ИТОГОВЫЙ ОТЧЕТ ПО ФАБРИКЕ НЕЙРОСЕТЕЙ")
     print("="*80)

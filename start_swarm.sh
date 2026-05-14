@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- НАСТРОЙКИ ---
-CMD='python run_walkforward.py --dataset_dir "data/processed/2000_2026_1d_90_15" --bonus_ratio 0.2 --runs 200 --epochs 100 --l2_reg "1e-5" --lr "2e-3" --start_fold "fold_2024" --append'
+CMD='python run_walkforward.py --dataset_dir "data/processed/2000_2026_1d_90_15" --bonus_ratio 0.2 --runs 200 --epochs 100 --l2_reg "1e-5" --lr "1e-3" --start_fold "fold_2024" --append'
 
 VRAM_PER_WORKER=3000 
 
@@ -10,7 +10,7 @@ OS_BUFFER=1700
 
 # Пауза между запусками (в секундах). 
 # Дает первому процессу время скомпилировать XLA и уйти в быстрые эпохи.
-STAGGER_DELAY=5 
+STAGGER_DELAY=15 
 # -----------------
 
 echo "🔍 Анализирую ресурсы GPU..."

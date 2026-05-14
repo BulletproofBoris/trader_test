@@ -1,38 +1,47 @@
 import json
 from pathlib import Path
 import tensorflow as tf
-from tensorflow.keras.layers import Input, Dense, Dropout, LayerNormalization, LSTM, Flatten, Activation, Dot, GaussianNoise
+from tensorflow.keras.layers import Input, Dense, Dropout, LayerNormalization, LSTM, Flatten, Activation, Dot, Conv1D, GlobalMaxPooling1D, Concatenate
 from tensorflow.keras.models import Model
 from tensorflow.keras import regularizers
 
-def create_model(seq_len, n_features, l2_reg=1e-4): # Чуть повысили базовый L2
+def create_model(seq_len, n_features, l2_reg=1e-5): # <-- Вернули L2 к адекватному 1e-5
     inputs = Input(shape=(seq_len, n_features), name="input_layer")
-    
-    # Нормализуем входы
     x = LayerNormalization()(inputs)
-    
-    # 🛡️ АНТИ-ЗУБРЕЖКА: Добавляем 2% случайного шума
-    # Работает только на Train! На Val/Test сеть будет видеть чистые данные
-    x = GaussianNoise(0.01)(x)
 
-    # --- БЛОК 1 (32 нейрона) ---
-    x = LSTM(32, return_sequences=True, kernel_regularizer=regularizers.l2(l2_reg))(x)
-    x = LayerNormalization()(x)
-    x = Dropout(0.3)(x)
+    # ==========================================
+    # ⚡ ВЕТКА 1: Быстрый импульс (CNN)
+    # Ищет локальные ценовые паттерны (свечные формации)
+    # ==========================================
+    conv = Conv1D(filters=32, kernel_size=3, padding='same', activation='relu')(x)
+    conv = Conv1D(filters=32, kernel_size=5, padding='same', activation='relu')(conv)
+    # Выхватываем самые сильные сигналы за все 90 дней (вектор 32)
+    conv_out = GlobalMaxPooling1D()(conv) 
 
-    # --- БЛОК 2 (16 нейронов) ---
-    lstm_out = LSTM(16, return_sequences=True, kernel_regularizer=regularizers.l2(l2_reg))(x)
+    # ==========================================
+    # 🧠 ВЕТКА 2: Глубокий контекст (LSTM + Attention)
+    # Анализирует макро-тренд и взаимосвязи
+    # ==========================================
+    lstm = LSTM(32, return_sequences=True, kernel_regularizer=regularizers.l2(l2_reg))(x)
+    lstm = LayerNormalization()(lstm)
+    lstm = Dropout(0.2)(lstm) # Снизили Dropout до 0.2
+
+    lstm_out = LSTM(16, return_sequences=True, kernel_regularizer=regularizers.l2(l2_reg))(lstm)
     lstm_out = LayerNormalization()(lstm_out)
-    lstm_out = Dropout(0.3)(lstm_out)
-
-    # 👁️ МЕХАНИЗМ ВНИМАНИЯ (Attention)
+    
+    # Внимание только на LSTM-ветке
     attention_scores = Dense(1, activation='tanh')(lstm_out)
     attention_scores = Flatten()(attention_scores)
     attention_weights = Activation('softmax', name='attention_weights')(attention_scores)
-    x = Dot(axes=1)([attention_weights, lstm_out])
+    lstm_att = Dot(axes=1)([attention_weights, lstm_out]) # Вектор 16
+
+    # ==========================================
+    # 🧬 СЛИЯНИЕ И ФИНАЛ
+    # ==========================================
+    # Соединяем сигналы CNN (32) и LSTM (16) = 48 признаков
+    merged = Concatenate()([conv_out, lstm_att])
     
-    # --- Финальный слой (Расширен до 16) ---
-    x = Dense(16, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(x)
+    x = Dense(32, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(merged)
     x = LayerNormalization()(x)
     x = Dropout(0.2)(x)
     
