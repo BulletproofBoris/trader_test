@@ -96,3 +96,4 @@ multistart*.csv
 stratified*.csv
 filelist.txt
 organizer.py
+worker_swarm_*.txt
