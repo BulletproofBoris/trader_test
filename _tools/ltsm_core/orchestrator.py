@@ -1,6 +1,7 @@
 import sqlite3
 import time
 import json
+import os
 import numpy as np
 from pathlib import Path
 from .math_utils import MathTrendAnalyzer
@@ -34,9 +35,16 @@ class SmartOrchestrator:
                 run_id TEXT PRIMARY KEY,
                 config TEXT, fold TEXT, hyperparams TEXT,
                 val_loss REAL, val_acc REAL, avg_epoch_time REAL,
-                overhead_time REAL, total_ttc REAL, status TEXT
+                overhead_time REAL, total_ttc REAL, status TEXT,
+                session_id TEXT DEFAULT 'legacy'
             )
         """)
+        # Пытаемся добавить колонку "на лету", если БД была создана старой версией кода
+        try:
+            self._execute("ALTER TABLE runs ADD COLUMN session_id TEXT DEFAULT 'legacy'")
+        except:
+            pass # Если колонка уже есть, просто игнорируем ошибку
+
         self._execute("CREATE TABLE IF NOT EXISTS folds_meta (fold_name TEXT PRIMARY KEY, best_loss REAL)")
         self._execute("""
             CREATE TABLE IF NOT EXISTS workers (
@@ -76,8 +84,8 @@ class SmartOrchestrator:
                 if not self._execute("SELECT 1 FROM runs WHERE run_id=?", (run_id,), fetch=True):
                     self._execute(
                         """INSERT INTO runs 
-                           (run_id, config, fold, hyperparams, val_loss, val_acc, avg_epoch_time, overhead_time, total_ttc, status) 
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'COMPLETED')""",
+                           (run_id, config, fold, hyperparams, val_loss, val_acc, avg_epoch_time, overhead_time, total_ttc, status, session_id) 
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'COMPLETED', 'legacy')""",
                         (run_id, dataset_name, fold_name, "{}", loss, acc, 0.0, 0.0, ttc)
                     )
                     added_count += 1
@@ -134,9 +142,11 @@ class SmartOrchestrator:
             return True, f"Неопределенность высокая ({uncertainty:.5f}).", global_best
 
     def register_run_start(self, run_id, config, fold, hyperparams):
+        # 🌟 ЧИТАЕМ ИДЕНТИФИКАТОР РОЯ ИЗ БАША (Либо ставим 'manual')
+        session_id = os.environ.get("SWARM_ID", "manual_run")
         self._execute(
-            "INSERT INTO runs (run_id, config, fold, hyperparams, status) VALUES (?, ?, ?, ?, 'TRAINING')",
-            (run_id, config, fold, json.dumps(hyperparams))
+            "INSERT INTO runs (run_id, config, fold, hyperparams, status, session_id) VALUES (?, ?, ?, ?, 'TRAINING', ?)",
+            (run_id, config, fold, json.dumps(hyperparams), session_id)
         )
 
     def register_run_end(self, run_id, fold_name, val_loss, val_acc, avg_epoch_time, overhead_time, total_ttc, status='COMPLETED'):
