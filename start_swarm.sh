@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- НАСТРОЙКИ ---
-CMD='python run_walkforward.py --dataset_dir "data/processed/2000_2026_1d_90_15" --bonus_ratio 0.2 --runs 200 --epochs 100 --l2_reg "1e-5" --lr "1e-3" --start_fold "fold_2010" --append'
+CMD='python run_walkforward.py --dataset_dir "data/processed/2000_2026_1d_60_10" --bonus_ratio 0.2 --runs 200 --epochs 100 --l2_reg "1e-5" --lr "1e-3" --start_fold "fold_2014" --append'
 
 VRAM_PER_WORKER=3000
 

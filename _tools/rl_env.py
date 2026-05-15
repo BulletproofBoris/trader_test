@@ -64,7 +64,7 @@ class TradingEnv(gym.Env):
         self.prev_balance = self.initial_balance 
         self.current_position = 0 
         self.current_ticker = None
-        self.entry_price = 0.0 # Цена входа в позицию
+        self.entry_price = 0.0 
         
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -120,15 +120,18 @@ class TradingEnv(gym.Env):
             self.current_position = desired_position
             
             if desired_position != 0:
-                self.entry_price = current_price # Запоминаем цену новой позиции
+                self.entry_price = current_price
             else:
-                self.entry_price = 0.0 # Сброс при выходе в кэш
+                self.entry_price = 0.0 
 
-        # 3. Награда агента
-        step_reward = ((self.balance - self.prev_balance) / self.prev_balance) * 100
+        # 3. Награда агента (Исправлено на Логарифмическую доходность)
+        # Логарифм делает награду симметричной для PPO-сетей
+        if self.balance > 0 and self.prev_balance > 0:
+            step_reward = np.log(self.balance / self.prev_balance) * 100.0
+        else:
+            step_reward = -100.0 # Катастрофа, слив
         
-        if self.current_position == 0:
-            step_reward -= 0.01 # Легкий штраф за бездействие
+        # Штраф за нахождение в кэше удален. Агент должен уметь ждать!
             
         self.prev_balance = self.balance
         self.current_step += 1

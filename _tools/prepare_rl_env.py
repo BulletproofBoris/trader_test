@@ -29,11 +29,16 @@ def create_sequences(df, feature_cols, lookback):
 
 def main():
     PROCESSED_DIR = Path("data/processed")
+    
+    # 🌟 ОБНОВЛЕННЫЙ СПИСОК ВСЕХ КОНФИГУРАЦИЙ 🌟
     CONFIGS = {
         "c90": "2000_2026_1d_90_15",
         "c60": "2000_2026_1d_60_10", 
         "c30": "2000_2026_1d_30_5", 
-        "c18": "2000_2026_1d_18_3"
+        "c20": "2000_2026_1d_20_1",
+        "c18": "2000_2026_1d_18_3",
+        "c10": "2000_2026_1d_10_5",
+        "c6":  "2000_2026_1d_6_1"
     }
     
     RL_ENV_DIR = PROCESSED_DIR / "2000_2026_1d" / "rl_env"
@@ -55,7 +60,7 @@ def main():
     all_rl_data = []
     env_metadata = {}
 
-    print(f"🚀 СТАРТ: Сборка Мульти-Таймфрейм Ансамбля")
+    print(f"🚀 СТАРТ: Сборка Мульти-Таймфрейм Ансамбля ({len(CONFIGS)} таймфреймов)")
     
     for fold_name in folds:
         print(f"\n🧩 Собираем консилиум для {fold_name}:")
@@ -79,6 +84,7 @@ def main():
             features_json = fold_dir / "artifacts" / "features_selected.json"
             
             if not models_dir.exists() or not val_parquet.exists() or not features_json.exists():
+                print(f"     ⚠️ Не хватает данных или моделей, пропускаем.")
                 continue
                 
             with open(features_json, 'r') as f:
@@ -94,9 +100,7 @@ def main():
             model_scores = []
             
             for model_path in models:
-                # Очищаем сессию
                 tf.keras.backend.clear_session()
-                
                 try:
                     model = tf.keras.models.load_model(model_path, compile=False)
                     
@@ -112,24 +116,20 @@ def main():
                     else:
                         X_model = X_val
                         
-                    # --- ИСПРАВЛЕНИЕ: РУЧНОЙ БАТЧИНГ БЕЗ ПЕРЕГРУЗКИ ПАМЯТИ ---
                     batch_size = 2048
                     probs_list = []
                     
                     for j in range(0, len(X_model), batch_size):
                         batch_x = X_model[j:j+batch_size]
-                        # Прямой Eager-вызов без построения графов tf.data.Dataset
                         batch_probs = model(batch_x, training=False).numpy()
                         probs_list.append(batch_probs)
                         
                     probs = np.concatenate(probs_list, axis=0)
-                    # ---------------------------------------------------------
                     
                     preds = np.argmax(probs, axis=1)
                     score = f1_score(y_val, preds, average='macro')
                     model_scores.append({"path": model_path, "f1": score, "probs": probs})
                     
-                    # Уничтожаем модель
                     del model
                     
                 except Exception as e:
@@ -196,7 +196,7 @@ def main():
     print(f"\n🎉 ПЕСОЧНИЦА УСПЕШНО СОБРАНА!")
     print(f"   Файл: {OUTPUT_FILE}")
     print(f"   Количество строк: {len(final_env_df)}")
-    print(f"   Количество фичей + вероятностей: {len(final_env_df.columns)}")
+    print(f"   Количество колонок (Фичи + 21x3 вероятностей): {len(final_env_df.columns)}")
 
 if __name__ == "__main__":
     main()
