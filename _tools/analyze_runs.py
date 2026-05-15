@@ -181,9 +181,14 @@ def main():
     
     plt.grid(alpha=0.3, linestyle='--')
     
-    y_lim_bottom = q5_c - 0.01 if successful_boots >= 10 else np.min(y_fit_raw) - 0.02
+    if successful_boots >= 10:
+        # Берем минимум между нижней границей асимптоты и ФАКТИЧЕСКИМ рекордом
+        lowest_point = min(q5_c, np.min(y_fit_raw))
+        y_lim_bottom = lowest_point - 0.015
+    else:
+        y_lim_bottom = np.min(y_fit_raw) - 0.02
+        
     plt.ylim(y_lim_bottom, valid_max)
     plt.show()
-
 if __name__ == "__main__":
     main()
