@@ -29,6 +29,21 @@ class SmartOrchestrator:
                 else:
                     raise
 
+    def get_saving_threshold(self, fold_name, keep=3):
+        """
+        Возвращает худший val_loss среди топ-N лучших моделей.
+        Если моделей меньше, чем keep, возвращает инф, разрешая сохранение любой модели.
+        """
+        rows = self._execute(
+            """SELECT val_loss FROM runs 
+               WHERE fold=? AND status='COMPLETED' AND val_loss IS NOT NULL 
+               ORDER BY val_loss ASC LIMIT ?""",
+            (fold_name, keep), fetch=True
+        )
+        if len(rows) < keep:
+            return float('inf')
+        return rows[-1][0] # Возвращаем val_loss последней (худшей из лучших) модели
+
     def _create_tables(self):
         self._execute("""
             CREATE TABLE IF NOT EXISTS runs (

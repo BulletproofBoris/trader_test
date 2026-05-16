@@ -123,10 +123,21 @@ def main(args):
                 print(f"\n{'='*60}\n🛑 ОСТАНОВКА ФОЛДА: {reason}\n{'='*60}")
                 break
 
-            print(f"\n{'-'*60}\n🔄 ИТЕРАЦИЯ {run}/{args.runs} (Цель Loss < {global_best_loss:.4f})")
+            # 🌟 ДИНАМИЧЕСКИЙ ПОРОГ ДЛЯ ТОП-3
+            swarm_id = os.environ.get("SWARM_ID", "manual")
+            saving_threshold = orchestrator.get_saving_threshold(args.fold, keep=3)
+            
+            # Определяем красивый вывод цели в консоль
+            if saving_threshold == float('inf'):
+                target_str = "Заполнение Топ-3 пула"
+            else:
+                target_str = f"Loss < {saving_threshold:.4f}"
+
+            print(f"\n{'-'*60}\n🔄 ИТЕРАЦИЯ {run}/{args.runs} (Цель: {target_str})")
             print(f"📈 Статус тренда: {reason}\n{'-'*60}")
             
-            run_id = f"run_{hashlib.md5(f'{time.time()}_{np.random.randint(1000)}'.encode()).hexdigest()[:8]}"
+            run_hash = hashlib.md5(f'{time.time()}_{np.random.randint(1000)}'.encode()).hexdigest()[:6]
+            run_id = f"run_{swarm_id}_{run_hash}"
             hyperparams = {"lr": args.lr, "logical_batch": logical_batch, "phys_batch": phys_batch, "l2": args.l2_reg}
             orchestrator.register_run_start(run_id, Path(args.dataset_dir).name, args.fold, hyperparams)
             
@@ -149,11 +160,6 @@ def main(args):
                 metrics=['accuracy'],
                 jit_compile=True
             )
-
-            #print(f"\n🧪 [Mixed Precision Check]")
-            #print(f"Политика первого слоя (fp16_projection): {model.get_layer('fp16_projection').compute_dtype}")
-            #print(f"Политика финального слоя (out): {model.get_layer('out').compute_dtype}")
-            #print("-" * 30 + "\n")
             
             temp_weights_path = MODELS_DIR / f"temp_best_{run_id}.weights.h5"
             profiler = ElasticPatienceProfiler(orchestrator, args.fold, args.epochs, args.bonus_ratio, args.min_delta)
@@ -186,9 +192,16 @@ def main(args):
             
             if not profiler.pruned:
                 print(f"\n🎯 Итог итерации {run}: Val Loss = {loss:.4f} | Val Acc = {acc*100:.2f}%")
-                if loss < global_best_loss:
+                
+                # 🌟 ПЕРЕПРОВЕРКА ПОРОГА ПЕРЕД СОХРАНЕНИЕМ (актуально для распределенного роя)
+                final_threshold = orchestrator.get_saving_threshold(args.fold, keep=3)
+                
+                if loss < final_threshold:
                     save_record_model(model, history, acc, loss, profiler.total_ttc, run_id, Path(args.dataset_dir).name, args.fold, seq_len, n_features, MODELS_DIR)
-                    print(f"🏆 Модель-рекордсмен сохранена!")
+                    if loss < global_best_loss:
+                        print(f"🏆 АБСОЛЮТНЫЙ РЕКОРД! Модель сохранена на 1-е место!")
+                    else:
+                        print(f"💎 МОДЕЛЯ ПРИНЯТА! Пробила порог Топ-3 лучших (Порог был: {final_threshold:.4f})")
 
     finally:
         orchestrator.remove_worker(worker_id)
