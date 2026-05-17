@@ -53,7 +53,7 @@ do
     if [ $? != 0 ]; then
         echo "🚀 [Воркер $i/$MAX_WORKERS] Создаю сессию: $SESSION"
         tmux new-session -d -s "$SESSION"
-        tmux send-keys -t "$SESSION" "$CMD > ${SESSION}_log.txt 2>&1" C-m
+        tmux send-keys -t "$SESSION" "while true; do $CMD >> ${SESSION}_log.txt 2>&1; if [ \$? -ne 0 ]; then echo '🛑 Оркестратор остановил рой.'; break; fi; done" C-mtmux send-keys -t "$SESSION" "$CMD > ${SESSION}_log.txt 2>&1" C-m
         
         if [ "$i" -lt "$MAX_WORKERS" ]; then
             echo "⏳ Жду $STAGGER_DELAY сек, пока XLA-компилятор освободит CPU..."

@@ -91,22 +91,37 @@ def main(args):
     val_record_path = TFRECORDS_DIR / "val" / "data.tfrecord"
     
     # -------------------------------------------------------------
-    # 🧠 АДАПТИВНЫЙ БАТЧ (Hardware Limit + Math Limit)
+    # 🧠 АДАПТИВНЫЙ БАТЧ (С КЭШИРОВАНИЕМ)
     # -------------------------------------------------------------
     num_train_samples = count_tfrecord_samples(train_record_path)
+    batch_config_path = ARTIFACTS_DIR / "batch_config.json"
     
-    # 1. Спрашиваем математику: какой батч идеален, если бы памяти было бесконечно много? (передаем 999999)
-    ideal_logical, _, _ = get_adaptive_batch_config(num_train_samples, max_phys_batch=999999)
-    
-    # 2. Тестируем железо, но НЕ ВЫШЕ идеального батча!
-    max_phys_batch = find_max_physical_batch(create_model, seq_len, n_features, start_batch=ideal_logical)
-    
-    # 3. Финальный конфиг (на случай, если даже идеал не влез и нужно включить накопление градиентов)
-    logical_batch, phys_batch, accum_steps = get_adaptive_batch_config(num_train_samples, max_phys_batch)
-    
-    print(f"\n📊 СТАТИСТИКА: {num_train_samples} тренировочных примеров.")
-    print(f"🎯 Идеальный (математический) батч: {logical_batch}")
-    print(f"🔧 Физический батч в VRAM: {phys_batch} (Шагов накопления: x{accum_steps})")
+    if batch_config_path.exists():
+        # Если батч уже считали в прошлой "жизни" воркера — просто читаем
+        with open(batch_config_path, 'r', encoding='utf-8') as f:
+            b_conf = json.load(f)
+        logical_batch = b_conf["logical_batch"]
+        phys_batch = b_conf["phys_batch"]
+        accum_steps = b_conf["accum_steps"]
+        print(f"\n♻️ Загружен кэшированный размер батча: {phys_batch} (Накопление: x{accum_steps})")
+        print(f"📊 СТАТИСТИКА: {num_train_samples} тренировочных примеров.")
+    else:
+        # Если это самый первый запуск — считаем и сохраняем на диск
+        print("\n🔍 Вычисляем оптимальный размер батча (Первый запуск)...")
+        ideal_logical, _, _ = get_adaptive_batch_config(num_train_samples, max_phys_batch=999999)
+        max_phys_batch = find_max_physical_batch(create_model, seq_len, n_features, start_batch=ideal_logical)
+        logical_batch, phys_batch, accum_steps = get_adaptive_batch_config(num_train_samples, max_phys_batch)
+        
+        with open(batch_config_path, 'w', encoding='utf-8') as f:
+            json.dump({
+                "logical_batch": logical_batch, 
+                "phys_batch": phys_batch, 
+                "accum_steps": accum_steps
+            }, f)
+            
+        print(f"📊 СТАТИСТИКА: {num_train_samples} тренировочных примеров.")
+        print(f"🎯 Идеальный (математический) батч: {logical_batch}")
+        print(f"🔧 Физический батч в VRAM: {phys_batch} (Шагов накопления: x{accum_steps})")
     
     class_weights_dict = compute_class_weights_fast(train_record_path)
     train_dataset = load_tfrecord_dataset(train_record_path, phys_batch, seq_len, n_features, is_training=True)
@@ -122,7 +137,7 @@ def main(args):
             )
             if not can_continue:
                 print(f"\n{'='*60}\n🛑 ОСТАНОВКА ФОЛДА: {reason}\n{'='*60}")
-                break
+                sys.exit(1) # Ошибка 1 сообщит Bash-скрипту, что нужно остановить цикл while
 
             # 🌟 ДИНАМИЧЕСКИЙ ПОРОГ ДЛЯ ТОП-3
             swarm_id = os.environ.get("SWARM_ID", "manual")
@@ -144,6 +159,8 @@ def main(args):
             
             tf.keras.backend.clear_session()
             gc.collect()
+            
+            # Дополнительная жесткая очистка (не помешает даже при рестартах)
             try:
                 ctypes.CDLL("libc.so.6").malloc_trim(0)
             except Exception:
@@ -181,7 +198,7 @@ def main(args):
                 history = model.fit(train_dataset, epochs=args.epochs, validation_data=val_dataset, callbacks=callbacks, class_weight=class_weights_dict, verbose=2)
             except KeyboardInterrupt:
                 print("\n⚠️ Прервано пользователем.")
-                break
+                sys.exit(1)
 
             if os.path.exists(temp_weights_path):
                 model.load_weights(temp_weights_path)
@@ -199,7 +216,7 @@ def main(args):
             if not profiler.pruned:
                 print(f"\n🎯 Итог итерации {run}: Val Loss = {loss:.4f} | Val Acc = {acc*100:.2f}%")
                 
-                # 🌟 ПЕРЕПРОВЕРКА ПОРОГА ПЕРЕД СОХРАНЕНИЕМ (актуально для распределенного роя)
+                # 🌟 ПЕРЕПРОВЕРКА ПОРОГА ПЕРЕД СОХРАНЕНИЕМ
                 final_threshold = orchestrator.get_saving_threshold(args.fold, keep=3)
                 
                 if loss < final_threshold:
@@ -208,6 +225,11 @@ def main(args):
                         print(f"🏆 АБСОЛЮТНЫЙ РЕКОРД! Модель сохранена на 1-е место!")
                     else:
                         print(f"💎 МОДЕЛЯ ПРИНЯТА! Пробила порог Топ-3 лучших (Порог был: {final_threshold:.4f})")
+
+            # ♻️ ПАТТЕРН "КАМИКАДЗЕ" (Принудительный рестарт каждые 10 итераций)
+            if run % 10 == 0:
+                print(f"\n♻️ [КАМИКАДЗЕ] Плановый рестарт процесса для очистки RAM (Выполнено {run} итераций).")
+                sys.exit(0) # Код 0 говорит Bash-скрипту: "Все ок, запусти меня заново"
 
     finally:
         orchestrator.remove_worker(worker_id)
