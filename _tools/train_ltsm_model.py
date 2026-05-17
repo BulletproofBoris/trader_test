@@ -8,6 +8,7 @@ from pathlib import Path
 import warnings
 import numpy as np
 import json
+import ctypes
 
 # Жестко прописываем путь к корню инструментов
 current_dir = Path(__file__).resolve().parent
@@ -143,6 +144,11 @@ def main(args):
             
             tf.keras.backend.clear_session()
             gc.collect()
+            try:
+                ctypes.CDLL("libc.so.6").malloc_trim(0)
+            except Exception:
+                pass
+            
             model = create_model(seq_len, n_features, args.l2_reg)
             
             # --- Накопление градиентов ---

@@ -15,7 +15,7 @@ fi
 CMD="python run_walkforward.py $ARGS"
 
 # --- НАСТРОЙКИ VRAM ---
-VRAM_PER_WORKER=3000
+VRAM_PER_WORKER=1500
 OS_BUFFER=1700 
 STAGGER_DELAY=10 
 # -----------------
