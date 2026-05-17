@@ -9,7 +9,6 @@ def main():
     parser = argparse.ArgumentParser(description="Оркестратор массового обучения LSTM (Walk-Forward)")
     parser.add_argument("--dataset_dir", type=str, default="data/processed/2000_2026_1d_6_1", help="Путь к корневой папке датасета")
     parser.add_argument("--runs", type=int, default=100, help="Количество прогонов (runs) для каждого фолда")
-    # Удален параметр --batch_size, так как теперь он адаптивный!
     parser.add_argument("--epochs", type=int, default=100, help="Количество эпох обучения")
     parser.add_argument("--l2_reg", type=str, default="1e-3", help="Коэффициент L2 регуляризации")
     parser.add_argument("--lr", type=str, default="8e-2", help="Стартовый Learning Rate")
@@ -80,13 +79,22 @@ def main():
             if args.force:
                 cmd.append("--force")
             
-            process = subprocess.Popen(cmd)
-            process.wait()
-            
-            if process.returncode == 0:
-                print(f"✅ [{fold_name}] Завершен успешно!")
-            else:
-                print(f"⚠️ [{fold_name}] Завершился с кодом ошибки: {process.returncode}")
+            # --- БЕСКОНЕЧНЫЙ ЦИКЛ ОДНОГО ФОЛДА С ОБРАБОТКОЙ КАМИКАДЗЕ ---
+            while True:
+                process = subprocess.Popen(cmd)
+                process.wait()
+                
+                if process.returncode == 3:
+                    print(f"♻️ [Камикадзе] Перезапуск {fold_name} для очистки памяти...")
+                    continue  # Крутим цикл дальше, перезапускаем тот же фолд
+                    
+                elif process.returncode == 0:
+                    print(f"✅ [{fold_name}] Завершен успешно!")
+                    break     # Выходим из while, переходим к СЛЕДУЮЩЕМУ фолду
+                    
+                else:
+                    print(f"⚠️ [{fold_name}] Ошибка: код {process.returncode}. Останавливаем рой.")
+                    sys.exit(process.returncode) # Убиваем пайплайн при жесткой ошибке
 
     except KeyboardInterrupt:
         print("\n🛑 Остановка пайплайна пользователем!")
