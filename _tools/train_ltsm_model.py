@@ -130,26 +130,39 @@ def main(args):
     worker_id = f"worker_{os.getpid()}_{hashlib.md5(str(time.time()).encode()).hexdigest()[:6]}"
     print(f"\n🚀 Старт обучения. Воркер: {worker_id}")
 
+    local_runs_this_session = 0
+
     try:
-        for run in range(1, args.runs + 1):
+        while True:
+            # 1. Читаем глобальное количество попыток из базы данных
+            rows = orchestrator._execute("SELECT COUNT(*) FROM runs WHERE fold=?", (args.fold,), fetch=True)
+            global_runs_done = rows[0][0] if rows else 0
+
+            # 2. Проверка глобального бюджета Роя
+            if global_runs_done >= args.runs:
+                print(f"\n{'='*60}\n🛑 ГЛОБАЛЬНЫЙ БЮДЖЕТ ИСЧЕРПАН ({global_runs_done}/{args.runs} ранов).\n{'='*60}")
+                sys.exit(0) # Успешный выход. Оркестратор перейдет к следующему фолду.
+
+            current_run = global_runs_done + 1
+            local_runs_this_session += 1
+
             can_continue, reason, global_best_loss = orchestrator.evaluate_potential(
-                args.fold, worker_id, args.runs - run + 1, current_run_index=run
+                args.fold, worker_id, args.runs - global_runs_done, current_run_index=current_run
             )
             if not can_continue:
                 print(f"\n{'='*60}\n🛑 ОСТАНОВКА ФОЛДА: {reason}\n{'='*60}")
-                sys.exit(0) # Ошибка 1 сообщит Bash-скрипту, что нужно остановить цикл while
+                sys.exit(0)
 
             # 🌟 ДИНАМИЧЕСКИЙ ПОРОГ ДЛЯ ТОП-3
             swarm_id = os.environ.get("SWARM_ID", "manual")
             saving_threshold = orchestrator.get_saving_threshold(args.fold, keep=3)
             
-            # Определяем красивый вывод цели в консоль
             if saving_threshold == float('inf'):
                 target_str = "Заполнение Топ-3 пула"
             else:
                 target_str = f"Loss < {saving_threshold:.4f}"
 
-            print(f"\n{'-'*60}\n🔄 ИТЕРАЦИЯ {run}/{args.runs} (Цель: {target_str})")
+            print(f"\n{'-'*60}\n🔄 ИТЕРАЦИЯ {current_run}/{args.runs} (Цель: {target_str})")
             print(f"📈 Статус тренда: {reason}\n{'-'*60}")
             
             run_hash = hashlib.md5(f'{time.time()}_{np.random.randint(1000)}'.encode()).hexdigest()[:6]
@@ -160,7 +173,6 @@ def main(args):
             tf.keras.backend.clear_session()
             gc.collect()
             
-            # Дополнительная жесткая очистка (не помешает даже при рестартах)
             try:
                 ctypes.CDLL("libc.so.6").malloc_trim(0)
             except Exception:
@@ -214,9 +226,8 @@ def main(args):
             )
             
             if not profiler.pruned:
-                print(f"\n🎯 Итог итерации {run}: Val Loss = {loss:.4f} | Val Acc = {acc*100:.2f}%")
+                print(f"\n🎯 Итог итерации {current_run}: Val Loss = {loss:.4f} | Val Acc = {acc*100:.2f}%")
                 
-                # 🌟 ПЕРЕПРОВЕРКА ПОРОГА ПЕРЕД СОХРАНЕНИЕМ
                 final_threshold = orchestrator.get_saving_threshold(args.fold, keep=3)
                 
                 if loss < final_threshold:
@@ -226,10 +237,10 @@ def main(args):
                     else:
                         print(f"💎 МОДЕЛЯ ПРИНЯТА! Пробила порог Топ-3 лучших (Порог был: {final_threshold:.4f})")
 
-            # ♻️ ПАТТЕРН "КАМИКАДЗЕ" (Принудительный рестарт каждые 10 итераций)
-            if run % 10 == 0:
-                print(f"\n♻️ [КАМИКАДЗЕ] Плановый рестарт процесса для очистки RAM (Выполнено {run} итераций).")
-                sys.exit(3) # Код 0 говорит Bash-скрипту: "Все ок, запусти меня заново"
+            # ♻️ ПАТТЕРН "КАМИКАДЗЕ" (Считаем только локальные итерации этой жизни)
+            if local_runs_this_session >= 10:
+                print(f"\n♻️ [КАМИКАДЗЕ] Плановый рестарт процесса для очистки RAM (Выполнено 10 итераций подряд).")
+                sys.exit(3) # Сигнал для run_walkforward.py на перезапуск
 
     finally:
         orchestrator.remove_worker(worker_id)
