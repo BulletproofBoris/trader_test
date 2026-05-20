@@ -15,9 +15,9 @@ fi
 CMD="python run_walkforward.py $ARGS"
 
 # --- НАСТРОЙКИ VRAM ---
-VRAM_PER_WORKER=2000
+VRAM_PER_WORKER=2500
 OS_BUFFER=1500 
-STAGGER_DELAY=2 
+STAGGER_DELAY=10 
 # -----------------
 
 echo "🔍 Анализирую ресурсы GPU..."
