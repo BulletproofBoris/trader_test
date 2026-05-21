@@ -4,32 +4,56 @@ import tensorflow as tf
 from tensorflow.keras.layers import Input, Dense, Dropout, LayerNormalization, LSTM, Flatten, Activation, Dot, Conv1D, GlobalMaxPooling1D, Concatenate
 from tensorflow.keras.models import Model
 from tensorflow.keras import regularizers
+import math
 
-def create_model(seq_len, n_features, l2_reg=1e-5): # <-- Вернули L2 к адекватному 1e-5
+def create_model(seq_len, n_features, l2_reg):
     inputs = Input(shape=(seq_len, n_features), name="input_layer")
     x = LayerNormalization()(inputs)
 
     # ==========================================
-    # ⚡ ВЕТКА 1: Быстрый импульс (CNN)
-    # Ищет локальные ценовые паттерны (свечные формации)
+    # ⚡ ВЕТКА 1: АДАПТИВНЫЙ ИМПУЛЬС (CNN)
     # ==========================================
-    conv = Conv1D(filters=32, kernel_size=3, padding='same', activation='relu')(x)
-    conv = Conv1D(filters=32, kernel_size=5, padding='same', activation='relu')(conv)
-    # Выхватываем самые сильные сигналы за все 90 дней (вектор 32)
-    conv_out = GlobalMaxPooling1D()(conv) 
+    # Вычисляем размеры ядер динамически.
+    kernel_1 = max(1, math.ceil(seq_len * 0.1))
+    kernel_2 = max(1, math.ceil(seq_len * 0.2))
+    kernel_3 = max(1, math.ceil(seq_len * 0.3))
+    kernel_4 = max(1, math.ceil(seq_len * 0.4))
+    kernel_5 = max(1, math.ceil(seq_len * 0.5))
+    kernel_6 = max(1, math.ceil(seq_len * 0.6))
+    
+    # Используем параллельные свертки (Inception-style), а не последовательные,
+    # чтобы короткие и длинные паттерны не "перемешивались" раньше времени.
+    conv_1 = Conv1D(filters=8, kernel_size=kernel_1, padding='same', activation='relu')(x)
+    conv_1_pool = GlobalMaxPooling1D()(conv_1)
+    
+    conv_2 = Conv1D(filters=8, kernel_size=kernel_2, padding='same', activation='relu')(x)
+    conv_2_pool = GlobalMaxPooling1D()(conv_2)
+
+    conv_3 = Conv1D(filters=8, kernel_size=kernel_3, padding='same', activation='relu')(x)
+    conv_3_pool = GlobalMaxPooling1D()(conv_3)
+    
+    conv_4 = Conv1D(filters=8, kernel_size=kernel_4, padding='same', activation='relu')(conv_1)
+    conv_4_pool = GlobalMaxPooling1D()(conv_4)
+
+    conv_5 = Conv1D(filters=8, kernel_size=kernel_5, padding='same', activation='relu')(conv_2)
+    conv_5_pool = GlobalMaxPooling1D()(conv_5)
+
+    conv_6 = Conv1D(filters=8, kernel_size=kernel_6, padding='same', activation='relu')(conv_3)
+    conv_6_pool = GlobalMaxPooling1D()(conv_6)
+
+    # Склеиваем оба масштаба
+    conv_out = Concatenate()([conv_4_pool,conv_5_pool,conv_6_pool]) # Вектор 8*3=24
 
     # ==========================================
-    # 🧠 ВЕТКА 2: Глубокий контекст (LSTM + Attention)
-    # Анализирует макро-тренд и взаимосвязи
+    # 🧠 ВЕТКА 2: ГЛУБОКИЙ КОНТЕКСТ (LSTM + Attention)
     # ==========================================
     lstm = LSTM(32, return_sequences=True, kernel_regularizer=regularizers.l2(l2_reg))(x)
     lstm = LayerNormalization()(lstm)
-    lstm = Dropout(0.2)(lstm) # Снизили Dropout до 0.2
+    lstm = Dropout(0.2)(lstm)
 
     lstm_out = LSTM(16, return_sequences=True, kernel_regularizer=regularizers.l2(l2_reg))(lstm)
     lstm_out = LayerNormalization()(lstm_out)
     
-    # Внимание только на LSTM-ветке
     attention_scores = Dense(1, activation='tanh')(lstm_out)
     attention_scores = Flatten()(attention_scores)
     attention_weights = Activation('softmax', name='attention_weights')(attention_scores)
@@ -38,10 +62,11 @@ def create_model(seq_len, n_features, l2_reg=1e-5): # <-- Вернули L2 к �
     # ==========================================
     # 🧬 СЛИЯНИЕ И ФИНАЛ
     # ==========================================
-    # Соединяем сигналы CNN (32) и LSTM (16) = 48 признаков
+    # Соединяем сигналы адаптивной CNN (64) и LSTM (16) = 80 признаков
     merged = Concatenate()([conv_out, lstm_att])
     
-    x = Dense(32, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(merged)
+    # Слегка увеличим плотный слой, чтобы переварить 80 признаков
+    x = Dense(64, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(merged)
     x = LayerNormalization()(x)
     x = Dropout(0.2)(x)
     

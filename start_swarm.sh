@@ -3,35 +3,31 @@
 # Генерируем уникальный ID для этого пула воркеров
 export SWARM_ID="s_$(date +'%d_%H%M%S')"
 
-# --- НАСТРОЙКИ VRAM ---
+# --- Значения по умолчанию ---
 VRAM_PER_WORKER=1700
 OS_BUFFER=1500 
 STAGGER_DELAY=10
-TEMP_ARGS=""
-# -----------------
+PYTHON_ARGS=""
 
+# --- Функция парсинга аргументов ---
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --vram) VRAM_PER_WORKER="$2"; shift ;;
         --stagger) STAGGER_DELAY="$2"; shift ;;
-        *) ARGS="$ARGS $1" ;;
+        *) PYTHON_ARGS="$PYTHON_ARGS $1" ;; # Собираем всё остальное для Python
     esac
     shift
 done
 
-# Проверяем, переданы ли аргументы в скрипт
-if [ $# -eq 0 ]; then
+# Если PYTHON_ARGS остались пустыми, задаем дефолтные настройки
+if [ -z "$PYTHON_ARGS" ]; then
     echo "⚠️ Аргументы не переданы! Использую дефолтные настройки..."
-    ARGS="--dataset_dir data/processed/2000_2026_1d_20_1 --bonus_ratio 0.2 --runs 200 --epochs 100 --l2_reg 1e-5 --lr 4e-3 --start_fold fold_2020 --append"
-else
-    # Если переданы, берем их все ($@)
-    ARGS="$@"
+    PYTHON_ARGS="--dataset_dir data/processed/2000_2026_1d_20_1 --bonus_ratio 0.2 --runs 200 --epochs 100 --l2_reg 1e-5 --lr 4e-3 --start_fold fold_2020 --append"
 fi
 
-CMD="python run_walkforward.py $ARGS"
+CMD="python run_walkforward.py $PYTHON_ARGS"
 
 echo "🔍 Анализирую ресурсы GPU..."
-
 TOTAL_VRAM=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -n 1)
 
 if [ -z "$TOTAL_VRAM" ]; then
@@ -42,15 +38,14 @@ fi
 AVAILABLE_VRAM=$((TOTAL_VRAM - OS_BUFFER))
 MAX_WORKERS=$((AVAILABLE_VRAM / VRAM_PER_WORKER))
 
-if [ "$MAX_WORKERS" -gt 8 ]; then
-    MAX_WORKERS=8
-fi
+# Ограничиваем сверху 8 воркерами (защита от перегрева CPU/системы)
+[ "$MAX_WORKERS" -gt 8 ] && MAX_WORKERS=8
 
 echo "📊 VRAM всего: ${TOTAL_VRAM} MB"
 echo "📊 VRAM доступно (без ОС): ${AVAILABLE_VRAM} MB"
-echo "🎯 Рассчитано воркеров: ${MAX_WORKERS} (по ${VRAM_PER_WORKER} MB каждый)"
+echo "🎯 Рассчитано воркеров: ${MAX_WORKERS} (по ${VRAM_PER_WORKER} MB каждый, задержка ${STAGGER_DELAY}с)"
 echo "---------------------------------------------------"
-echo "🚀 Запуск с аргументами: $ARGS"
+echo "🚀 Запуск с командой: $CMD"
 echo "🏷️ Идентификатор сессии (Swarm ID): $SWARM_ID"
 echo "---------------------------------------------------"
 
@@ -64,7 +59,7 @@ do
         echo "🚀 [Воркер $i/$MAX_WORKERS] Создаю сессию: $SESSION"
         tmux new-session -d -s "$SESSION"
         
-        # ЧИСТАЯ СТРОКА С ЦИКЛОМ "КАМИКАДЗЕ" (Без склеек)
+        # Запуск команды
         tmux send-keys -t "$SESSION" "$CMD >> ${SESSION}_log.txt 2>&1" C-m
         
         if [ "$i" -lt "$MAX_WORKERS" ]; then
