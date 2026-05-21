@@ -13,7 +13,9 @@ def main():
     parser.add_argument("--l2_reg", type=str, default="1e-3", help="Коэффициент L2 регуляризации")
     parser.add_argument("--lr", type=str, default="8e-2", help="Стартовый Learning Rate")
     parser.add_argument("--start_fold", type=str, default="fold_2010", help="Имя фолда, с которого начать (например, fold_2018)")
-    
+    parser.add_argument("--factor", type=float, default=0.5)
+    parser.add_argument("--patience", type=int, default=3)
+
     # НОВЫЕ ПАРАМЕТРЫ ЭЛАСТИЧНОГО ТЕРПЕНИЯ
     parser.add_argument("--bonus_ratio", type=float, default=0.1, help="Доля от микро-лимита, добавляемая за рекорд")
     parser.add_argument("--min_delta", type=float, default=0.001, help="Минимальное улучшение Loss для получения бонуса")
@@ -71,7 +73,9 @@ def main():
                 "--l2_reg", args.l2_reg,
                 "--lr", args.lr,
                 "--bonus_ratio", str(args.bonus_ratio),
-                "--min_delta", str(args.min_delta)
+                "--min_delta", str(args.min_delta),
+                "--factor", str(args.factor),
+                "--patience", str(args.patience)
             ]
             
             if args.append:

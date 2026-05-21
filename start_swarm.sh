@@ -3,6 +3,22 @@
 # Генерируем уникальный ID для этого пула воркеров
 export SWARM_ID="s_$(date +'%d_%H%M%S')"
 
+# --- НАСТРОЙКИ VRAM ---
+VRAM_PER_WORKER=1700
+OS_BUFFER=1500 
+STAGGER_DELAY=10
+TEMP_ARGS=""
+# -----------------
+
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --vram) VRAM_PER_WORKER="$2"; shift ;;
+        --stagger) STAGGER_DELAY="$2"; shift ;;
+        *) ARGS="$ARGS $1" ;;
+    esac
+    shift
+done
+
 # Проверяем, переданы ли аргументы в скрипт
 if [ $# -eq 0 ]; then
     echo "⚠️ Аргументы не переданы! Использую дефолтные настройки..."
@@ -13,12 +29,6 @@ else
 fi
 
 CMD="python run_walkforward.py $ARGS"
-
-# --- НАСТРОЙКИ VRAM ---
-VRAM_PER_WORKER=1700
-OS_BUFFER=1500 
-STAGGER_DELAY=10 
-# -----------------
 
 echo "🔍 Анализирую ресурсы GPU..."
 

@@ -201,7 +201,7 @@ def main(args):
             
             callbacks = [
                 ModelCheckpoint(filepath=temp_weights_path, save_weights_only=True, monitor='val_loss', mode='min', save_best_only=True, verbose=0),
-                SmartBacktrackCallback(best_weights_path=temp_weights_path, monitor_loss='val_loss', factor=0.5, patience=3, min_lr=1e-5),
+                SmartBacktrackCallback(best_weights_path=temp_weights_path, monitor_loss='val_loss', factor=args.factor, patience=args.patience, min_lr=1e-5),
                 tf.keras.callbacks.TerminateOnNaN(),
                 profiler
             ]
@@ -258,5 +258,7 @@ if __name__ == "__main__":
     parser.add_argument("--append", action="store_true")
     parser.add_argument("--bonus_ratio", type=float, default=0.1)
     parser.add_argument("--min_delta", type=float, default=0.001)
+    parser.add_argument("--factor", type=float, default=0.5)
+    parser.add_argument("--patience", type=int, default=3)
     args = parser.parse_args()
     main(args)
