@@ -17,32 +17,32 @@ def create_model(seq_len, n_features, l2_reg):
     kernel_1 = max(1, math.ceil(seq_len * 0.1))
     kernel_2 = max(1, math.ceil(seq_len * 0.2))
     kernel_3 = max(1, math.ceil(seq_len * 0.3))
-    kernel_4 = max(1, math.ceil(seq_len * 0.3))
-    kernel_5 = max(1, math.ceil(seq_len * 0.4))
-    kernel_6 = max(1, math.ceil(seq_len * 0.5))
+    kernel_4 = max(1, math.ceil(seq_len * 0.5))
+    kernel_5 = max(1, math.ceil(seq_len * 0.6))
+    kernel_6 = max(1, math.ceil(seq_len * 0.7))
     
     # Используем параллельные свертки (Inception-style), а не последовательные,
     # чтобы короткие и длинные паттерны не "перемешивались" раньше времени.
-    conv_1 = Conv1D(filters=16, kernel_size=kernel_1, padding='same', activation='relu')(x)
+    conv_1 = Conv1D(filters=12, kernel_size=kernel_1, padding='same', activation='relu')(x)
     conv_1_pool = GlobalMaxPooling1D()(conv_1)
     
-    conv_2 = Conv1D(filters=16, kernel_size=kernel_2, padding='same', activation='relu')(x)
+    conv_2 = Conv1D(filters=12, kernel_size=kernel_2, padding='same', activation='relu')(x)
     conv_2_pool = GlobalMaxPooling1D()(conv_2)
 
-    conv_3 = Conv1D(filters=16, kernel_size=kernel_3, padding='same', activation='relu')(x)
+    conv_3 = Conv1D(filters=12, kernel_size=kernel_3, padding='same', activation='relu')(x)
     conv_3_pool = GlobalMaxPooling1D()(conv_3)
     
-    conv_4 = Conv1D(filters=16, kernel_size=kernel_4, padding='same', activation='relu')(conv_1)
+    conv_4 = Conv1D(filters=12, kernel_size=kernel_4, padding='same', activation='relu')(conv_1)
     conv_4_pool = GlobalMaxPooling1D()(conv_4)
 
-    conv_5 = Conv1D(filters=16, kernel_size=kernel_5, padding='same', activation='relu')(conv_2)
+    conv_5 = Conv1D(filters=12, kernel_size=kernel_5, padding='same', activation='relu')(conv_2)
     conv_5_pool = GlobalMaxPooling1D()(conv_5)
 
-    conv_6 = Conv1D(filters=16, kernel_size=kernel_6, padding='same', activation='relu')(conv_3)
+    conv_6 = Conv1D(filters=12, kernel_size=kernel_6, padding='same', activation='relu')(conv_3)
     conv_6_pool = GlobalMaxPooling1D()(conv_6)
 
     # Склеиваем оба масштаба
-    conv_out = Concatenate()([conv_4_pool, conv_5_pool, conv_6_pool]) # Вектор 16*3=48
+    conv_out = Concatenate()([conv_4_pool, conv_6_pool]) # Вектор 16*3=48
 
     # ==========================================
     # 🧠 ВЕТКА 2: ГЛУБОКИЙ КОНТЕКСТ (LSTM + Attention)
