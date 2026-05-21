@@ -1,22 +1,39 @@
 import sys
-import json
 import shutil
 import argparse
 from pathlib import Path
 
 def main():
-    parser = argparse.ArgumentParser(description="Глобальная очистка моделей с подробным отчетом")
-    parser.add_argument("--base_dir", type=str, default="data/processed", help="Путь к базовой папке")
+    parser = argparse.ArgumentParser(description="Глобальная очистка моделей и логов с подробным отчетом")
+    parser.add_argument("--base_dir", type=str, default="data/processed", help="Путь к базовой папке с моделями")
+    parser.add_argument("--logs_dir", type=str, default=".", help="Папка, где лежат лог-файлы (по умолчанию текущая)")
     parser.add_argument("--keep", type=int, default=3, help="Сколько лучших моделей оставить")
     args = parser.parse_args()
     
     base_dir = Path(args.base_dir)
+    logs_dir = Path(args.logs_dir)
+    
     if not base_dir.exists():
         print(f"❌ Ошибка: {base_dir} не найдена!")
         sys.exit(1)
 
-    print(f"🧹 Запуск ГЛОБАЛЬНОЙ уборки в: {base_dir} (Оставляем Топ-{args.keep} по val_loss)...")
+    print(f"🧹 Запуск ГЛОБАЛЬНОЙ уборки...")
+    print(f"   📂 Модели: {base_dir} (Оставляем Топ-{args.keep})")
+    print(f"   📜 Логи: {logs_dir}/worker_swarm_*_log.txt")
     
+    # 1. ОЧИСТКА ЛОГОВ (worker_swarm_*_log.txt)
+    deleted_logs = 0
+    for log_file in logs_dir.glob("worker_swarm_*_log.txt"):
+        try:
+            log_file.unlink()
+            deleted_logs += 1
+        except Exception as e:
+            print(f"   ⚠️ Не удалось удалить лог {log_file.name}: {e}")
+    
+    if deleted_logs > 0:
+        print(f"   🧹 Удалено лог-файлов воркеров: {deleted_logs}")
+
+    # 2. ОЧИСТКА МОДЕЛЕЙ
     dataset_dirs = sorted([d for d in base_dir.iterdir() if d.is_dir()])
     
     grand_total_deleted = 0
@@ -37,7 +54,7 @@ def main():
 
             print(f"\n📂 Фолд: {fold_dir.name}")
             
-            # 1. ОЧИСТКА ВРЕМЕННОГО МУСОРА
+            # Очистка временного мусора
             temp_files = []
             for f in models_dir.iterdir():
                 is_trash = False
@@ -62,17 +79,12 @@ def main():
                     grand_total_temp += 1
                 except Exception: pass
             
-            if temp_files:
-                print(f"   🧹 Удалено системного мусора: {len(temp_files)} файлов")
-
-            # 2. АНАЛИЗ И ФИЛЬТРАЦИЯ МОДЕЛЕЙ
+            # Фильтрация моделей
             keras_files = list(models_dir.glob("*.keras"))
             valid_models = []
 
             for m_file in keras_files:
                 if m_file in temp_files: continue
-                
-                # И старый, и новый формат используют одинаковое расширение .json
                 json_file = m_file.with_suffix(".json")
                 
                 val_loss = float('inf')
@@ -81,64 +93,42 @@ def main():
                 
                 if json_file.exists():
                     try:
+                        import json as jmod
                         with open(json_file, 'r', encoding='utf-8') as jf:
-                            meta = json.load(jf)
-                            
-                            # Так как и в старом, и в новом формате метрики лежат в "metrics",
-                            # мы универсально читаем их оттуда!
+                            meta = jmod.load(jf)
                             if "metrics" in meta:
-                                v_loss = meta["metrics"].get("val_loss")
-                                v_acc = meta["metrics"].get("val_acc")
-                                
-                                val_loss = float(v_loss) if v_loss is not None else float('inf')
-                                val_acc = float(v_acc) if v_acc is not None else 0.0
-                            
+                                val_loss = float(meta["metrics"].get("val_loss", float('inf')))
+                                val_acc = float(meta["metrics"].get("val_acc", 0.0))
                             run_id = meta.get("run_id", "?")
-                    except Exception:
-                        pass
+                    except Exception: pass
                 
-                valid_models.append({
-                    "path": m_file, 
-                    "json": json_file,
-                    "loss": val_loss,
-                    "acc": val_acc,
-                    "run": run_id
-                })
+                valid_models.append({"path": m_file, "json": json_file, "loss": val_loss, "acc": val_acc, "run": run_id})
 
-            # Сортируем строго по val_loss (чем меньше, тем лучше)
             valid_models.sort(key=lambda x: x["loss"])
-
             elites = valid_models[:args.keep]
             trash = valid_models[args.keep:]
 
-            # Удаляем слабые модели И их JSON-паспорта
             if trash:
                 for bad in trash:
                     try:
                         bad["path"].unlink()
-                        if bad["json"].exists(): 
-                            bad["json"].unlink()
+                        if bad["json"].exists(): bad["json"].unlink()
                         grand_total_deleted += 1
                     except Exception: pass
                 print(f"   🗑️  Списано слабых моделей: {len(trash)}")
 
-            # Выводим Топ-3
             if elites:
                 print("   💎 Элита фолда (Топ по Loss):")
-                for i, elite in enumerate(elites, 1):
-                    loss_str = f"{elite['loss']:.4f}" if elite['loss'] != float('inf') else "N/A"
-                    acc_str = f"{elite['acc']:.2f}%"
-                    print(f"      {i}. Run: {elite['run']:<10} | Loss: {loss_str} | Acc: {acc_str} | Файл: {elite['path'].name}")
+                for elite in elites:
+                    print(f"      Run: {elite['run']:<10} | Loss: {elite['loss']:.4f}")
                 grand_total_kept += len(elites)
-            else:
-                print("   ⚠️ Моделей не найдено.")
 
     print("\n" + "="*80)
-    print("🏁 ИТОГОВЫЙ ОТЧЕТ ПО ФАБРИКЕ НЕЙРОСЕТЕЙ")
+    print("🏁 ИТОГОВЫЙ ОТЧЕТ")
     print("="*80)
-    print(f"🟢 Всего 'элитных' моделей готово к бою: {grand_total_kept}")
-    print(f"🔴 Всего удалено слабых моделей:         {grand_total_deleted}")
-    print(f"🧹 Всего очищено временных файлов:       {grand_total_temp}")
+    print(f"🟢 Моделей сохранено:      {grand_total_kept}")
+    print(f"🔴 Удалено моделей:         {grand_total_deleted}")
+    print(f"📜 Удалено логов воркеров:  {deleted_logs}")
     print("="*80)
 
 if __name__ == "__main__":
