@@ -1,0 +1,15 @@
+{
+    "model_name": "trading_bot_loss_1.0126_acc_52.50_run_s_21_150615_879b30.keras",
+    "run_id": "run_s_21_150615_879b30",
+    "dataset": "2000_2026_1d_10_5",
+    "fold": "fold_2014",
+    "seq_len": 10,
+    "n_features": 72,
+    "metrics": {
+        "val_loss": 1.0125818252563477,
+        "val_acc": 52.49580144882202
+    },
+    "training_stats": {
+        "training_time_seconds": 226.60037422180176
+    }
+}

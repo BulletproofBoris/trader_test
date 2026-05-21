@@ -17,9 +17,9 @@ def create_model(seq_len, n_features, l2_reg):
     kernel_1 = max(1, math.ceil(seq_len * 0.1))
     kernel_2 = max(1, math.ceil(seq_len * 0.2))
     kernel_3 = max(1, math.ceil(seq_len * 0.3))
-    kernel_4 = max(1, math.ceil(seq_len * 0.4))
-    kernel_5 = max(1, math.ceil(seq_len * 0.5))
-    kernel_6 = max(1, math.ceil(seq_len * 0.6))
+    kernel_4 = max(1, math.ceil(seq_len * 0.3))
+    kernel_5 = max(1, math.ceil(seq_len * 0.4))
+    kernel_6 = max(1, math.ceil(seq_len * 0.5))
     
     # Используем параллельные свертки (Inception-style), а не последовательные,
     # чтобы короткие и длинные паттерны не "перемешивались" раньше времени.
@@ -42,7 +42,7 @@ def create_model(seq_len, n_features, l2_reg):
     conv_6_pool = GlobalMaxPooling1D()(conv_6)
 
     # Склеиваем оба масштаба
-    conv_out = Concatenate()([conv_4_pool,conv_5_pool, conv_6_pool]) # Вектор 16*3=48
+    conv_out = Concatenate()([conv_4_pool, conv_5_pool, conv_6_pool]) # Вектор 16*3=48
 
     # ==========================================
     # 🧠 ВЕТКА 2: ГЛУБОКИЙ КОНТЕКСТ (LSTM + Attention)
