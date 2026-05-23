@@ -42,7 +42,7 @@ def create_model(seq_len, n_features, l2_reg):
     conv_6_pool = GlobalMaxPooling1D()(conv_6)
 
     # Склеиваем оба масштаба
-    conv_out = Concatenate()([conv_4_pool, conv_6_pool]) # Вектор 16*3=48
+    conv_out = Concatenate()( [conv_4_pool, conv_6_pool] ) # Вектор 16*3=48
 
     # ==========================================
     # 🧠 ВЕТКА 2: ГЛУБОКИЙ КОНТЕКСТ (LSTM + Attention)

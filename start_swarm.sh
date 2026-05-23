@@ -30,6 +30,10 @@ CMD="python run_walkforward.py $PYTHON_ARGS"
 echo "🔍 Анализирую ресурсы GPU..."
 TOTAL_VRAM=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -n 1)
 
+echo "🚀 Включаем NVIDIA MPS для параллельной загрузки GPU..."
+# Запускаем фоновый сервер MPS (игнорируем ошибку, если он уже запущен)
+nvidia-cuda-mps-control -d 2>/dev/null || true
+
 if [ -z "$TOTAL_VRAM" ]; then
     echo "❌ Ошибка: Не удалось получить данные от nvidia-smi."
     exit 1
@@ -38,8 +42,8 @@ fi
 AVAILABLE_VRAM=$((TOTAL_VRAM - OS_BUFFER))
 MAX_WORKERS=$((AVAILABLE_VRAM / VRAM_PER_WORKER))
 
-# Ограничиваем сверху 8 воркерами (защита от перегрева CPU/системы)
-[ "$MAX_WORKERS" -gt 8 ] && MAX_WORKERS=8
+# Ограничиваем сверху 16 воркерами (защита от перегрева CPU/системы)
+[ "$MAX_WORKERS" -gt 16 ] && MAX_WORKERS=16
 
 echo "📊 VRAM всего: ${TOTAL_VRAM} MB"
 echo "📊 VRAM доступно (без ОС): ${AVAILABLE_VRAM} MB"

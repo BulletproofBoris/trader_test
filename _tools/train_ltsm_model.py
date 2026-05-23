@@ -9,6 +9,7 @@ import warnings
 import numpy as np
 import json
 import ctypes
+import multiprocessing
 
 # Жестко прописываем путь к корню инструментов
 current_dir = Path(__file__).resolve().parent
@@ -25,9 +26,18 @@ os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
 
 import tensorflow as tf
 
-# Включаем BFLOAT16 (Оптимально для серии RTX 3000/4000/5000)
-#tf.keras.mixed_precision.set_global_policy('mixed_bfloat16')
-#print("✅ BFLOAT16 включен!")
+# 1. Включаем кэширование компиляции XLA на диск (см. Причину 3)
+os.environ['TF_XLA_FLAGS'] = "--tf_xla_persistent_cache_directory=./xla_cache"
+
+# 2. Жестко ограничиваем потоки для каждого воркера!
+num_cores = multiprocessing.cpu_count()
+workers_count = 16 # Твой MAX_WORKERS из bash-скрипта
+threads_per_worker = max(2, num_cores // workers_count)
+
+tf.config.threading.set_inter_op_parallelism_threads(threads_per_worker)
+tf.config.threading.set_intra_op_parallelism_threads(threads_per_worker)
+
+print(f"⚙️ CPU-Квота: выделено {threads_per_worker} потоков на этот процесс.")
 
 # Форсируем включение аппаратного TF32 для тензорных ядер (на всякий случай)
 tf.config.experimental.enable_tensor_float_32_execution(True)
