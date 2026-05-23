@@ -14,31 +14,39 @@ def create_model(seq_len, n_features, l2_reg):
     # ⚡ ВЕТКА 1: АДАПТИВНЫЙ ИМПУЛЬС (CNN)
     # ==========================================
     # Вычисляем размеры ядер динамически.
-    kernel_1 = max(1, math.ceil(seq_len * 0.1))
-    kernel_2 = max(1, math.ceil(seq_len * 0.2))
-    kernel_3 = max(1, math.ceil(seq_len * 0.3))
-    kernel_4 = max(1, math.ceil(seq_len * 0.5))
-    kernel_5 = max(1, math.ceil(seq_len * 0.6))
-    kernel_6 = max(1, math.ceil(seq_len * 0.7))
+    p = 0.1
+    f = 12
+    kernel_1 = max(1, math.ceil(seq_len * p * 1))
+    kernel_2 = max(1, math.ceil(seq_len * p * 2))
+    kernel_3 = max(1, math.ceil(seq_len * p * 3))
+    kernel_4 = max(1, math.ceil(seq_len * p * 5))
+    kernel_5 = max(1, math.ceil(seq_len * p * 6))
+    kernel_6 = max(1, math.ceil(seq_len * p * 7))
     
     # Используем параллельные свертки (Inception-style), а не последовательные,
     # чтобы короткие и длинные паттерны не "перемешивались" раньше времени.
-    conv_1 = Conv1D(filters=12, kernel_size=kernel_1, padding='same', activation='relu')(x)
+    conv_1 = Conv1D(filters=f, kernel_size=kernel_1, padding='same', activation='relu')(x)
+    conv_1 = LayerNormalization()(conv_1)
     conv_1_pool = GlobalMaxPooling1D()(conv_1)
     
-    conv_2 = Conv1D(filters=12, kernel_size=kernel_2, padding='same', activation='relu')(x)
-    conv_2_pool = GlobalMaxPooling1D()(conv_2)
+    #conv_2 = Conv1D(filters=f, kernel_size=kernel_2, padding='same', activation='relu')(x)
+    #conv_2 = LayerNormalization()(conv_2)
+    #conv_2_pool = GlobalMaxPooling1D()(conv_2)
 
-    conv_3 = Conv1D(filters=12, kernel_size=kernel_3, padding='same', activation='relu')(x)
+    conv_3 = Conv1D(filters=f, kernel_size=kernel_3, padding='same', activation='relu')(x)
+    conv_3 = LayerNormalization()(conv_3)
     conv_3_pool = GlobalMaxPooling1D()(conv_3)
     
-    conv_4 = Conv1D(filters=12, kernel_size=kernel_4, padding='same', activation='relu')(conv_1)
+    conv_4 = Conv1D(filters=f, kernel_size=kernel_4, padding='same', activation='relu')(conv_1)
+    conv_4 = LayerNormalization()(conv_4)
     conv_4_pool = GlobalMaxPooling1D()(conv_4)
 
-    conv_5 = Conv1D(filters=12, kernel_size=kernel_5, padding='same', activation='relu')(conv_2)
-    conv_5_pool = GlobalMaxPooling1D()(conv_5)
+    #conv_5 = Conv1D(filters=f, kernel_size=kernel_5, padding='same', activation='relu')(conv_2)
+    #conv_5 = LayerNormalization()(conv_5)
+    #conv_5_pool = GlobalMaxPooling1D()(conv_5)
 
-    conv_6 = Conv1D(filters=12, kernel_size=kernel_6, padding='same', activation='relu')(conv_3)
+    conv_6 = Conv1D(filters=f, kernel_size=kernel_6, padding='same', activation='relu')(conv_3)
+    conv_6 = LayerNormalization()(conv_6)
     conv_6_pool = GlobalMaxPooling1D()(conv_6)
 
     # Склеиваем оба масштаба
@@ -66,9 +74,9 @@ def create_model(seq_len, n_features, l2_reg):
     merged = Concatenate()([conv_out, lstm_att])
     
     # Слегка увеличим плотный слой, чтобы переварить 80 признаков
-    x = Dense(64, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(merged)
+    x = Dense(32, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(merged)
     x = LayerNormalization()(x)
-    x = Dropout(0.2)(x)
+    x = Dropout(0.4)(x)
     
     outputs = Dense(3, activation='softmax', name='out')(x)
     

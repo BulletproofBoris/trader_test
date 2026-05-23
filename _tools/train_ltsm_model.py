@@ -26,7 +26,7 @@ os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
 
 import tensorflow as tf
 
-# 1. Включаем кэширование компиляции XLA на диск (см. Причину 3)
+# 1. Включаем кэширование компиляции XLA на диск
 os.environ['TF_XLA_FLAGS'] = "--tf_xla_persistent_cache_directory=./xla_cache"
 
 # 2. Жестко ограничиваем потоки для каждого воркера!
@@ -101,37 +101,54 @@ def main(args):
     val_record_path = TFRECORDS_DIR / "val" / "data.tfrecord"
     
     # -------------------------------------------------------------
-    # 🧠 АДАПТИВНЫЙ БАТЧ (С КЭШИРОВАНИЕМ)
+    # 🧠 АДАПТИВНЫЙ БАТЧ (БЕЗОПАСНАЯ ПРОВЕРКА С БЛОКИРОВКОЙ)
     # -------------------------------------------------------------
     num_train_samples = count_tfrecord_samples(train_record_path)
     batch_config_path = ARTIFACTS_DIR / "batch_config.json"
+    lock_file = ARTIFACTS_DIR / "batch_calc.lock"
     
-    if batch_config_path.exists():
-        # Если батч уже считали в прошлой "жизни" воркера — просто читаем
-        with open(batch_config_path, 'r', encoding='utf-8') as f:
-            b_conf = json.load(f)
-        logical_batch = b_conf["logical_batch"]
-        phys_batch = b_conf["phys_batch"]
-        accum_steps = b_conf["accum_steps"]
-        print(f"\n♻️ Загружен кэшированный размер батча: {phys_batch} (Накопление: x{accum_steps})")
-        print(f"📊 СТАТИСТИКА: {num_train_samples} тренировочных примеров.")
-    else:
-        # Если это самый первый запуск — считаем и сохраняем на диск
-        print("\n🔍 Вычисляем оптимальный размер батча (Первый запуск)...")
-        ideal_logical, _, _ = get_adaptive_batch_config(num_train_samples, max_phys_batch=999999)
-        max_phys_batch = find_max_physical_batch(create_model, seq_len, n_features, start_batch=ideal_logical)
-        logical_batch, phys_batch, accum_steps = get_adaptive_batch_config(num_train_samples, max_phys_batch)
-        
-        with open(batch_config_path, 'w', encoding='utf-8') as f:
-            json.dump({
-                "logical_batch": logical_batch, 
-                "phys_batch": phys_batch, 
-                "accum_steps": accum_steps
-            }, f)
+    # Очистка "битых" замков после прерванных сессий
+    if lock_file.exists():
+        try: lock_file.unlink()
+        except: pass
+
+    if not batch_config_path.exists():
+        try:
+            # Создаем замок
+            fd = os.open(lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
             
-        print(f"📊 СТАТИСТИКА: {num_train_samples} тренировочных примеров.")
-        print(f"🎯 Идеальный (математический) батч: {logical_batch}")
-        print(f"🔧 Физический батч в VRAM: {phys_batch} (Шагов накопления: x{accum_steps})")
+            print(f"\n🔍 [Worker {os.getpid()}] Начинаю тест VRAM (Остальные ждут)...")
+            ideal_logical, _, _ = get_adaptive_batch_config(num_train_samples, max_phys_batch=999999)
+            max_phys_batch = find_max_physical_batch(create_model, seq_len, n_features, start_batch=ideal_logical)
+            logical_batch, phys_batch, accum_steps = get_adaptive_batch_config(num_train_samples, max_phys_batch)
+            
+            with open(batch_config_path, 'w', encoding='utf-8') as f:
+                json.dump({
+                    "logical_batch": logical_batch, 
+                    "phys_batch": phys_batch, 
+                    "accum_steps": accum_steps
+                }, f)
+            
+            if lock_file.exists(): 
+                lock_file.unlink()
+            print("✅ Конфиг батча успешно вычислен.")
+                
+        except FileExistsError:
+            print(f"\n⏳ [Worker {os.getpid()}] Другой процесс тестирует GPU. Жду...")
+            while not batch_config_path.exists():
+                time.sleep(2)
+            print("✅ Конфиг батча получен!")
+
+    # Читаем финальный конфиг
+    with open(batch_config_path, 'r', encoding='utf-8') as f:
+        b_conf = json.load(f)
+    
+    logical_batch = b_conf["logical_batch"]
+    phys_batch = b_conf["phys_batch"]
+    accum_steps = b_conf["accum_steps"]
+    
+    print(f"\n♻️ Загружен размер батча: {phys_batch} (Накопление: x{accum_steps}) | Примеров: {num_train_samples}")
     
     class_weights_dict = compute_class_weights_fast(train_record_path)
     train_dataset = load_tfrecord_dataset(train_record_path, phys_batch, seq_len, n_features, is_training=True)
@@ -190,8 +207,21 @@ def main(args):
             
             model = create_model(seq_len, n_features, args.l2_reg)
             
-            # --- Накопление градиентов ---
-            optimizer = tf.keras.optimizers.Adam(learning_rate=args.lr, clipvalue=0.5)
+            # --- ИСПРАВЛЕНО: Безопасная инициализация Оптимизатора ---
+            try:
+                # AdamW - современный стандарт со встроенным Weight Decay
+                optimizer = tf.keras.optimizers.AdamW(
+                    learning_rate=args.lr, 
+                    weight_decay=args.l2_reg,
+                    clipnorm=1.0  # Жестко обрубает "взрывные" векторы градиентов
+                )
+            except AttributeError:
+                # Фолбэк для старых версий TF
+                optimizer = tf.keras.optimizers.Adam(
+                    learning_rate=args.lr, 
+                    clipnorm=1.0
+                )
+                
             if accum_steps > 1:
                 try:
                     optimizer = tf.keras.optimizers.experimental.GradientAccumulation(optimizer, accum_steps=accum_steps)
@@ -229,28 +259,31 @@ def main(args):
             loss, acc = model.evaluate(val_dataset, verbose=0)
             status = 'PRUNED' if profiler.pruned else 'COMPLETED'
             
+            # 1. СНАЧАЛА узнаем проходной балл (пока база не обновилась!)
+            final_threshold = orchestrator.get_saving_threshold(args.fold, keep=3)
+            
+            # 2. ЗАТЕМ записываем наш новый результат в базу
             orchestrator.register_run_end(
                 run_id=run_id, fold_name=args.fold, val_loss=loss, val_acc=acc,
                 avg_epoch_time=profiler.avg_epoch_time, overhead_time=profiler.overhead_time,
                 total_ttc=profiler.total_ttc, status=status
             )
             
+            # 3. Теперь проверка сработает честно (сравниваем со СТАРЫМ порогом)
             if not profiler.pruned:
                 print(f"\n🎯 Итог итерации {current_run}: Val Loss = {loss:.4f} | Val Acc = {acc*100:.2f}%")
-                
-                final_threshold = orchestrator.get_saving_threshold(args.fold, keep=3)
                 
                 if loss < final_threshold:
                     save_record_model(model, history, acc, loss, profiler.total_ttc, run_id, Path(args.dataset_dir).name, args.fold, seq_len, n_features, MODELS_DIR)
                     if loss < global_best_loss:
                         print(f"🏆 АБСОЛЮТНЫЙ РЕКОРД! Модель сохранена на 1-е место!")
                     else:
-                        print(f"💎 МОДЕЛЯ ПРИНЯТА! Пробила порог Топ-3 лучших (Порог был: {final_threshold:.4f})")
+                        print(f"💎 МОДЕЛЬ ПРИНЯТА! Пробила порог Топ-3 лучших (Порог был: {final_threshold:.4f})")
 
             # ♻️ ПАТТЕРН "КАМИКАДЗЕ" (Считаем только локальные итерации этой жизни)
             if local_runs_this_session >= 10:
                 print(f"\n♻️ [КАМИКАДЗЕ] Плановый рестарт процесса для очистки RAM (Выполнено 10 итераций подряд).")
-                sys.exit(3) # Сигнал для run_walkforward.py на перезапуск
+                sys.exit(3)
 
     finally:
         orchestrator.remove_worker(worker_id)
