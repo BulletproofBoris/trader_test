@@ -4,57 +4,55 @@ import tensorflow as tf
 from tensorflow.keras.layers import Input, Dense, Dropout, LayerNormalization, LSTM, Flatten, Activation, Dot, Conv1D, GlobalMaxPooling1D, Concatenate
 from tensorflow.keras.models import Model
 from tensorflow.keras import regularizers
+from tensorflow.keras.layers import Add
+from tensorflow.keras.layers import Multiply
 import math
 
 def create_model(seq_len, n_features, l2_reg):
+    """
+    Создает гибридную модель: CNN для выделения признаков (Inception-style) 
+    и LSTM с механизмом Attention для анализа временных зависимостей.
+    """
     inputs = Input(shape=(seq_len, n_features), name="input_layer")
-    x = LayerNormalization()(inputs)
+    x = LayerNormalization()(inputs) # Нормализация входа для стабилизации градиентов
 
-    # ==========================================
+    # =========================================================================
     # ⚡ ВЕТКА 1: АДАПТИВНЫЙ ИМПУЛЬС (CNN)
-    # ==========================================
-    # Вычисляем размеры ядер динамически.
+    # Использует параллельные свертки для захвата паттернов разной длины.
+    # =========================================================================
     p = 0.1
     f = 12
+    # Динамическое вычисление размеров ядер на основе длины входной последовательности
     kernel_1 = max(1, math.ceil(seq_len * p * 1))
-    kernel_2 = max(1, math.ceil(seq_len * p * 2))
-    kernel_3 = max(1, math.ceil(seq_len * p * 3))
-    kernel_4 = max(1, math.ceil(seq_len * p * 5))
-    kernel_5 = max(1, math.ceil(seq_len * p * 6))
-    kernel_6 = max(1, math.ceil(seq_len * p * 7))
+    kernel_2 = max(1, math.ceil(seq_len * p * 3))
+    kernel_3 = max(1, math.ceil(seq_len * p * 5))
+    kernel_4 = max(1, math.ceil(seq_len * p * 7))
     
-    # Используем параллельные свертки (Inception-style), а не последовательные,
-    # чтобы короткие и длинные паттерны не "перемешивались" раньше времени.
+    # Слой 1: Параллельные свертки (масштабы 1 и 3)
     conv_1 = Conv1D(filters=f, kernel_size=kernel_1, padding='same', activation='relu')(x)
     conv_1 = LayerNormalization()(conv_1)
     conv_1_pool = GlobalMaxPooling1D()(conv_1)
-    
-    #conv_2 = Conv1D(filters=f, kernel_size=kernel_2, padding='same', activation='relu')(x)
-    #conv_2 = LayerNormalization()(conv_2)
-    #conv_2_pool = GlobalMaxPooling1D()(conv_2)
 
-    conv_3 = Conv1D(filters=f, kernel_size=kernel_3, padding='same', activation='relu')(x)
+    conv_2 = Conv1D(filters=f, kernel_size=kernel_2, padding='same', activation='relu')(x)
+    conv_2 = LayerNormalization()(conv_2)
+    conv_2_pool = GlobalMaxPooling1D()(conv_2)
+    
+    # Слой 2: Вложенные свертки для захвата иерархических признаков (масштабы 5 и 7)
+    conv_3 = Conv1D(filters=f, kernel_size=kernel_3, padding='same', activation='relu')(conv_1)
     conv_3 = LayerNormalization()(conv_3)
     conv_3_pool = GlobalMaxPooling1D()(conv_3)
-    
-    conv_4 = Conv1D(filters=f, kernel_size=kernel_4, padding='same', activation='relu')(conv_1)
+
+    conv_4 = Conv1D(filters=f, kernel_size=kernel_4, padding='same', activation='relu')(conv_2)
     conv_4 = LayerNormalization()(conv_4)
     conv_4_pool = GlobalMaxPooling1D()(conv_4)
 
-    #conv_5 = Conv1D(filters=f, kernel_size=kernel_5, padding='same', activation='relu')(conv_2)
-    #conv_5 = LayerNormalization()(conv_5)
-    #conv_5_pool = GlobalMaxPooling1D()(conv_5)
+    # Склеиваем выходы всех 2-х сверточных ветвей (Итого: 2 * 12 = 24 признаков)
+    conv_out = Concatenate()([conv_3_pool, conv_4_pool])
 
-    conv_6 = Conv1D(filters=f, kernel_size=kernel_6, padding='same', activation='relu')(conv_3)
-    conv_6 = LayerNormalization()(conv_6)
-    conv_6_pool = GlobalMaxPooling1D()(conv_6)
-
-    # Склеиваем оба масштаба
-    conv_out = Concatenate()( [conv_4_pool, conv_6_pool] ) # Вектор 16*3=48
-
-    # ==========================================
+    # =========================================================================
     # 🧠 ВЕТКА 2: ГЛУБОКИЙ КОНТЕКСТ (LSTM + Attention)
-    # ==========================================
+    # Анализирует последовательные зависимости и расставляет акценты.
+    # =========================================================================
     lstm = LSTM(32, return_sequences=True, kernel_regularizer=regularizers.l2(l2_reg))(x)
     lstm = LayerNormalization()(lstm)
     lstm = Dropout(0.2)(lstm)
@@ -62,21 +60,34 @@ def create_model(seq_len, n_features, l2_reg):
     lstm_out = LSTM(16, return_sequences=True, kernel_regularizer=regularizers.l2(l2_reg))(lstm)
     lstm_out = LayerNormalization()(lstm_out)
     
+    # Attention: вычисление весов значимости для каждого временного шага
     attention_scores = Dense(1, activation='tanh')(lstm_out)
     attention_scores = Flatten()(attention_scores)
     attention_weights = Activation('softmax', name='attention_weights')(attention_scores)
     lstm_att = Dot(axes=1)([attention_weights, lstm_out]) # Вектор 16
-
-    # ==========================================
-    # 🧬 СЛИЯНИЕ И ФИНАЛ
-    # ==========================================
-    # Соединяем сигналы адаптивной CNN (64) и LSTM (16) = 80 признаков
-    merged = Concatenate()([conv_out, lstm_att])
     
-    # Слегка увеличим плотный слой, чтобы переварить 80 признаков
-    x = Dense(32, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(merged)
+    # =========================================================================
+    # 🧬 GLOBAL CROSS-ATTENTION (Связующее звено)
+    # =========================================================================
+    # Проецируем CNN-признаки в пространство LSTM (16), чтобы они могли взаимодействовать
+    cnn_proj = Dense(16, activation='relu')(conv_out)
+
+    # Считаем важность CNN-признаков относительно контекста LSTM
+    # Используем Dot product для вычисления скоров сходства
+    cross_scores = Dot(axes=-1)([lstm_att, cnn_proj])
+    cross_scores = Activation('softmax')(cross_scores)
+    
+    # Применяем веса внимания к признакам CNN
+    # Это позволяет LSTM "отфильтровать" шум из сверток
+    refined_cnn = Multiply()([cross_scores, cnn_proj])
+    
+    # Итоговое слияние
+    merged = Concatenate()([refined_cnn, lstm_att])
+    
+    # Dense блок: финальная обработка перед классификацией
+    x = Dense(64, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(merged)
     x = LayerNormalization()(x)
-    x = Dropout(0.4)(x)
+    x = Dropout(0.2)(x) 
     
     outputs = Dense(3, activation='softmax', name='out')(x)
     
