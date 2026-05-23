@@ -5,6 +5,7 @@ import warnings
 import math
 import tensorflow as tf
 import gc
+import time
 
 class MathTrendAnalyzer:
     @staticmethod
@@ -85,11 +86,9 @@ class MathTrendAnalyzer:
         
         return true_c, q5_c, uncertainty, runs_needed
 
-def find_max_physical_batch(create_model_fn, seq_len, n_features, start_batch=8192):
+def find_max_physical_batch(create_model_fn, seq_len, n_features, start_batch=1024):
     print(f"\n🔍 [Hardware Test] Ищем потолок VRAM (Старт с батча {start_batch})...")
     
-    # Гарантируем, что старт начнется со степени двойки
-    import math
     batch_size = 2 ** math.floor(math.log2(start_batch))
     
     while batch_size >= 16:
@@ -97,53 +96,37 @@ def find_max_physical_batch(create_model_fn, seq_len, n_features, start_batch=81
             tf.keras.backend.clear_session()
             gc.collect()
             
-            model = create_model_fn(seq_len, n_features)
+            model = create_model_fn(seq_len, n_features, 1e-5)
             model.compile(optimizer='adam', loss='categorical_crossentropy')
             
-            # Генерируем шум строго в формате float16, чтобы не бесить CuDNN
             dummy_x = tf.random.normal((batch_size, seq_len, n_features))
             dummy_y = tf.random.normal((batch_size, 3))
-            
             model.train_on_batch(dummy_x, dummy_y)
             
             print(f"✅ Физический предел VRAM найден: батч {batch_size}")
+            
             del model, dummy_x, dummy_y
             tf.keras.backend.clear_session()
             gc.collect()
             
             return batch_size
             
-        except tf.errors.ResourceExhaustedError:
-            print(f"❌ Батч {batch_size} вызвал OOM (Стандартный). Пробуем {batch_size // 2}...")
+        except (tf.errors.ResourceExhaustedError, Exception) as e:
+            print(f"⚠️ Батч {batch_size} вызвал ошибку. Сброс контекста...")
+            tf.keras.backend.clear_session()
+            gc.collect()
             batch_size //= 2
+            time.sleep(1) # Пауза для GPU
             
-        except Exception as e:
-            # CuDNN часто выдает InternalError при нехватке памяти под Workspace
-            error_str = str(e)
-            if "DoRnnForward" in error_str or "CudnnRNN" in error_str or "Internal" in error_str:
-                print(f"❌ Батч {batch_size} слишком велик для CuDNN (Скрытый OOM). Пробуем {batch_size // 2}...")
-            else:
-                # Даже если ошибка другая, не сдаемся, а уменьшаем батч
-                print(f"⚠️ Батч {batch_size} вызвал ошибку драйвера. Пробуем {batch_size // 2}...")
-            
-            batch_size //= 2
-            
-    raise RuntimeError("Даже батч 32 не влез в VRAM! Проверьте архитектуру сети.")
+    return 16
 
-def get_adaptive_batch_config(num_samples, max_phys_batch, target_steps=100): # 🚀 ЦЕЛЬ: 50 шагов
-    # Идеальный математический батч
+def get_adaptive_batch_config(num_samples, max_phys_batch, target_steps=100):
     ideal_batch = num_samples / target_steps
-    
-    # Ищем ближайшую бОльшую степень двойки и жестко переводим в int
     math_batch = int(2 ** np.ceil(np.log2(ideal_batch)))
-    
-    # Не даем батчу стать слишком шумным (минимум 16, чтобы не было проблем на мелких фолдах)
     math_batch = max(math_batch, 16) 
     
     if math_batch <= max_phys_batch:
         return math_batch, math_batch, 1
     else:
-        # Памяти не хватает, включаем накопление (Gradient Accumulation)
-        # Убеждаемся, что accum_steps минимум 1 и тоже строго int
         accum_steps = int(max(1, math_batch // max_phys_batch))
         return math_batch, max_phys_batch, accum_steps
