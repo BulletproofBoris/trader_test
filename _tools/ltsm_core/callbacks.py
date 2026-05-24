@@ -6,7 +6,7 @@ from tensorflow.keras.callbacks import Callback
 
 class ElasticPatienceProfiler(Callback):
     def __init__(self, orchestrator, fold_name, max_epochs, bonus_ratio=0.1, min_delta=0.001,
-                 hard_prune_epoch=40,     # Эпоха включения гильотины
+                 hard_prune_epoch=30,     # Эпоха включения гильотины
                  hard_prune_z=4.0,        # Жесткий предел в сигмах
                  max_z_score=2.0):        # Элитный предел в сигмах
         super().__init__()
