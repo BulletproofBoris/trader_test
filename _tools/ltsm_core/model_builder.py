@@ -1,10 +1,21 @@
 import json
 from pathlib import Path
 import tensorflow as tf
-from tensorflow.keras.layers import Input, Dense, Dropout, LayerNormalization, LSTM, Flatten, Activation, Dot, Conv1D, GlobalAveragePooling1D, Concatenate
+from tensorflow.keras.layers import Input, Dense, Dropout, LayerNormalization, LSTM, Flatten, Activation, Dot, Conv1D, GlobalAveragePooling1D, Concatenate,Reshape, Multiply
 from tensorflow.keras.models import Model
 from tensorflow.keras import regularizers
 import math
+
+def se_block(input_tensor, reduction=4):
+    channels = input_tensor.shape[-1]
+    # Squeeze
+    x = GlobalAveragePooling1D()(input_tensor)
+    x = Reshape((1, channels))(x)
+    # Excitation
+    x = Dense(channels // reduction, activation='relu', kernel_initializer='he_normal')(x)
+    x = Dense(channels, activation='sigmoid', kernel_initializer='he_normal')(x)
+    # Scale
+    return Multiply()([input_tensor, x])
 
 def create_model(seq_len, n_features, l2_reg):
     inputs = Input(shape=(seq_len, n_features), name="input_layer")
@@ -40,10 +51,10 @@ def create_model(seq_len, n_features, l2_reg):
     # 🧠 ВЕТКА 2: ГЛУБОКИЙ КОНТЕКСТ (LSTM + Attention)
     # ==========================================
     lstm = LSTM(32, return_sequences=True, kernel_regularizer=regularizers.l2(l2_reg))(x)
-    lstm = Dropout(0.2)(lstm) # LayerNorm убран
+    lstm = Dropout(0.05)(lstm) # LayerNorm убран
 
     lstm_out = LSTM(16, return_sequences=True, kernel_regularizer=regularizers.l2(l2_reg))(lstm)
-    lstm_out = Dropout(0.2)(lstm_out) # LayerNorm убран
+    lstm_out = Dropout(0.05)(lstm_out) # LayerNorm убран
 
     # ИСПРАВЛЕННЫЙ ATTENTION: linear вместо tanh!
     attention_scores = Dense(1, activation='linear')(lstm_out)
@@ -63,7 +74,7 @@ def create_model(seq_len, n_features, l2_reg):
     merged = LayerNormalization()(merged)
     
     x = Dense(32, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(merged)
-    x = Dropout(0.4)(x) # Усиленный dropout на "бутылочном горлышке"
+    x = Dropout(0.2)(x) # Усиленный dropout на "бутылочном горлышке"
     
     outputs = Dense(3, activation='softmax', name='out')(x)
     
