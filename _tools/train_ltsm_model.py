@@ -208,6 +208,23 @@ def main(args):
             
             model = create_model(seq_len, n_features, args.l2_reg)
             
+            try:
+                ctypes.CDLL("libc.so.6").malloc_trim(0)
+            except Exception:
+                pass
+            
+            model = create_model(seq_len, n_features, args.l2_reg)
+            
+            # ---- ВСТАВКА ДЛЯ PCA ИНИЦИАЛИЗАЦИИ ----
+            if args.init_pca_coord is not None:
+                trajectories_dir = FOLD_DIR / "models" / "trajectories"
+                try:
+                    init_model_from_pca(model, trajectories_dir, args.init_pca_coord, args.init_pca_radius)
+                except Exception as e:
+                    print(f"⚠️ Критическая ошибка PCA-инициализации: {e}")
+                    print("🔄 Откат к стандартной (случайной) инициализации модели.")
+            # ----------------------------------------
+            
             # --- Безопасная инициализация Оптимизатора ---
             try:
                 # AdamW - современный стандарт со встроенным Weight Decay
@@ -295,6 +312,72 @@ def main(args):
         orchestrator.remove_worker(worker_id)
         print(f"👋 Воркер {worker_id} освободил мощности.")
 
+def init_model_from_pca(model, trajectories_dir, target_coord, radius):
+    """
+    Загружает историю всех траекторий воркеров, строит PCA-базис,
+    выполняет смещение в желаемую окрестность координат и инициализирует модель.
+    """
+    import numpy as np
+    import h5py
+    from sklearn.decomposition import PCA
+
+    print(f"\n🕵️‍♂️ [PCA Инициализация] Запуск обратного преобразования...")
+    print(f"📂 Сканирование папки траекторий для восстановления базиса ландшафта: {trajectories_dir}")
+
+    all_weights = []
+    # Собираем все плоские веса аналогично plot_landscape.py
+    for h5_file in trajectories_dir.glob("*.h5"):
+        try:
+            with h5py.File(h5_file, 'r', swmr=True) as f:
+                # Поддерживаем обе возможные структуры файлов
+                if 'trajectory' in f and 'weights' in f['trajectory']:
+                    all_weights.append(f['trajectory']['weights'][:])
+                elif 'ds_weights' in f:
+                    all_weights.append(f['ds_weights'][:])
+        except Exception:
+            continue
+
+    if not all_weights:
+        raise ValueError("❌ Не найдено ни одного файла траектории (*.h5) с весами для обучения PCA!")
+
+    # Строим матрицу весов (total_epochs, total_weights)
+    weights_matrix = np.vstack(all_weights)
+    print(f"📊 Собрана матрица весов формы {weights_matrix.shape}. Обучение PCA(n_components=2)...")
+
+    # Пересоздаем точно такой же PCA-базис, какой видит скрипт визуализации
+    pca = PCA(n_components=2)
+    pca.fit(weights_matrix)
+
+    pca1, pca2 = target_coord
+
+    # Если задан радиус окрестности, делаем случайное смещение внутри диска (равномерно)
+    if radius > 0:
+        alpha = 2 * np.pi * np.random.rand()
+        r = radius * np.sqrt(np.random.rand()) # sqrt гарантирует равномерность площади диска
+        pca1 += r * np.cos(alpha)
+        pca2 += r * np.sin(alpha)
+        print(f"🎲 Смещение внутри окрестности (R={radius:.2f}) -> Итоговые PCA1: {pca1:.2f}, PCA2: {pca2:.2f}")
+    else:
+        print(f"🎯 Точечная посадка без разброса -> PCA1: {pca1:.2f}, PCA2: {pca2:.2f}")
+
+    # Восстанавливаем высокоразмерный плоский вектор весов из 2D координат
+    flat_weights = pca.inverse_transform(np.array([[pca1, pca2]]))[0]
+
+    # Нарезаем плоский вектор обратно на послойные матрицы Keras
+    model_weights = model.get_weights()
+    restored_weights = []
+    cursor = 0
+    
+    for w in model_weights:
+        size = w.size
+        # Берем кусок нужного размера и возвращаем ему оригинальный shape слоя
+        restored_weights.append(flat_weights[cursor : cursor + size].reshape(w.shape))
+        cursor += size
+
+    # Загружаем веса в компилированную модель
+    model.set_weights(restored_weights)
+    print(f"✅ Веса модели успешно реконструированы и загружены!")
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset_dir", type=str, default="data/processed/2000_2026_1d")
@@ -309,5 +392,10 @@ if __name__ == "__main__":
     parser.add_argument("--min_delta", type=float, default=0.001)
     parser.add_argument("--factor", type=float, default=0.5)
     parser.add_argument("--patience", type=int, default=3)
+    # Настройки для инициализации через PCA координаты
+    parser.add_argument("--init_pca_coord", type=float, nargs=2, metavar=('PCA1', 'PCA2'), default=None,
+                        help="Координаты PCA для принудительной посадки модели (например: -100.0 120.0)")
+    parser.add_argument("--init_pca_radius", type=float, default=0.0,
+                        help="Радиус (величина окрестности) разброса вокруг указанных координат PCA")
     args = parser.parse_args()
     main(args)

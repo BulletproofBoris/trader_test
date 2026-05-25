@@ -67,7 +67,7 @@ def plot_landscape(fold_path):
     Z = griddata((coords[:, 0], coords[:, 1]), losses, (X, Y), method='linear')
     
     # Сглаживание шума (Gaussian Filter)
-    Z_smooth = gaussian_filter(Z, sigma=1.0) 
+    Z_smooth = gaussian_filter(Z, sigma=0.0) 
 
     # 5. Визуализация
     print("🎨 Генерация 3D-графика...")

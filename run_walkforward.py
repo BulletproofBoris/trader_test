@@ -15,6 +15,10 @@ def main():
     parser.add_argument("--start_fold", type=str, default="fold_2010", help="Имя фолда, с которого начать (например, fold_2018)")
     parser.add_argument("--factor", type=float, default=0.5)
     parser.add_argument("--patience", type=int, default=3)
+    
+    # ПАРАМЕТРЫ PCA
+    parser.add_argument("--init_pca_coord", type=float, nargs=2, metavar=('PCA1', 'PCA2'), default=None, help="Координаты PCA для посадки (например: -100.0 120.0)")
+    parser.add_argument("--init_pca_radius", type=float, default=0.0, help="Радиус случайного разброса")
 
     # НОВЫЕ ПАРАМЕТРЫ ЭЛАСТИЧНОГО ТЕРПЕНИЯ
     parser.add_argument("--bonus_ratio", type=float, default=0.1, help="Доля от микро-лимита, добавляемая за рекорд")
@@ -31,6 +35,8 @@ def main():
     print(f"📁 Датасет: {DATASET_DIR}")
     print(f"⚙️  Настройки: {args.runs} runs, {args.epochs} epochs (Батч вычисляется динамически!)")
     print(f"🧠 Эластичность: Bonus Ratio = {args.bonus_ratio}, Min Delta = {args.min_delta}")
+    if args.init_pca_coord is not None:
+        print(f"🎯 Высадка роя в координаты PCA: {args.init_pca_coord} (Радиус: {args.init_pca_radius})")
 
     if not DATASET_DIR.exists():
         print(f"❌ Ошибка: Директория {DATASET_DIR} не найдена!")
@@ -61,7 +67,6 @@ def main():
             print("="*60)
             
             # Формируем базовую команду вызова
-            # Используем прямой вызов файла, чтобы точно избежать проблем с путями
             script_path = str(Path("_tools") / "train_ltsm_model.py")
             
             cmd = [
@@ -76,13 +81,20 @@ def main():
                 "--min_delta", str(args.min_delta),
                 "--factor", str(args.factor),
                 "--patience", str(args.patience)
+                # УБРАНЫ ПРЯМЫЕ ССЫЛКИ НА PCA ОТСЮДА
             ]
             
             if args.append:
                 cmd.append("--append")
             if args.force:
                 cmd.append("--force")
-            
+                
+            # ПРАВИЛЬНОЕ ДОБАВЛЕНИЕ PCA
+            if args.init_pca_coord is not None:
+                cmd.extend(["--init_pca_coord", str(args.init_pca_coord[0]), str(args.init_pca_coord[1])])
+            if args.init_pca_radius > 0.0:
+                cmd.extend(["--init_pca_radius", str(args.init_pca_radius)])
+                
             # --- БЕСКОНЕЧНЫЙ ЦИКЛ ОДНОГО ФОЛДА С ОБРАБОТКОЙ КАМИКАДЗЕ ---
             while True:
                 process = subprocess.Popen(cmd)
