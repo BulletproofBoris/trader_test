@@ -1,21 +1,20 @@
 import json
 from pathlib import Path
 import tensorflow as tf
-from tensorflow.keras.layers import Input, Dense, Dropout, LayerNormalization, LSTM, Flatten, Activation, Dot, Conv1D, GlobalMaxPooling1D, Concatenate
+from tensorflow.keras.layers import Input, Dense, Dropout, LayerNormalization, LSTM, Flatten, Activation, Dot, Conv1D, GlobalAveragePooling1D, Concatenate
 from tensorflow.keras.models import Model
 from tensorflow.keras import regularizers
-from tensorflow.keras.layers import Add
-from tensorflow.keras.layers import Multiply
 import math
 
 def create_model(seq_len, n_features, l2_reg):
     inputs = Input(shape=(seq_len, n_features), name="input_layer")
+    
+    # Нормализуем сырой вход
     x = LayerNormalization()(inputs)
 
     # ==========================================
     # ⚡ ВЕТКА 1: АДАПТИВНЫЙ ИМПУЛЬС (CNN)
     # ==========================================
-    # Вычисляем размеры ядер динамически.
     p = 0.1
     f = 12
     kernel_1 = max(1, math.ceil(seq_len * p * 1))
@@ -23,50 +22,48 @@ def create_model(seq_len, n_features, l2_reg):
     kernel_3 = max(1, math.ceil(seq_len * p * 5))
     kernel_4 = max(1, math.ceil(seq_len * p * 7))
     
-    # Используем параллельные свертки (Inception-style), а не последовательные,
-    # чтобы короткие и длинные паттерны не "перемешивались" раньше времени.
+    # Убрали лишние LayerNorm, добавили Dropout для регуляризации фильтров
     conv_1 = Conv1D(filters=f, kernel_size=kernel_1, padding='same', activation='relu')(x)
-    conv_1 = LayerNormalization()(conv_1)
-
     conv_2 = Conv1D(filters=f, kernel_size=kernel_2, padding='same', activation='relu')(x)
-    conv_2 = LayerNormalization()(conv_2)
 
     conv_3 = Conv1D(filters=f, kernel_size=kernel_3, padding='same', activation='relu')(conv_1)
-    conv_3 = LayerNormalization()(conv_3)
-    conv_3_pool = GlobalMaxPooling1D()(conv_3)
+    # Используем AveragePooling вместо Max, чтобы сохранить усредненный фон паттерна, а не выброс
+    conv_3_pool = GlobalAveragePooling1D()(conv_3) 
 
     conv_4 = Conv1D(filters=f, kernel_size=kernel_4, padding='same', activation='relu')(conv_2)
-    conv_4 = LayerNormalization()(conv_4)
-    conv_4_pool = GlobalMaxPooling1D()(conv_4)
+    conv_4_pool = GlobalAveragePooling1D()(conv_4)
 
-    # Склеиваем оба масштаба
-    conv_out = Concatenate()( [conv_3_pool, conv_4_pool] ) # Вектор 12*2=24
+    # Вектор 24
+    conv_out = Concatenate()([conv_3_pool, conv_4_pool]) 
 
     # ==========================================
     # 🧠 ВЕТКА 2: ГЛУБОКИЙ КОНТЕКСТ (LSTM + Attention)
     # ==========================================
     lstm = LSTM(32, return_sequences=True, kernel_regularizer=regularizers.l2(l2_reg))(x)
-    lstm = LayerNormalization()(lstm)
-    lstm = Dropout(0.2)(lstm)
+    lstm = Dropout(0.2)(lstm) # LayerNorm убран
 
     lstm_out = LSTM(16, return_sequences=True, kernel_regularizer=regularizers.l2(l2_reg))(lstm)
-    lstm_out = LayerNormalization()(lstm_out)
-    
-    attention_scores = Dense(1, activation='tanh')(lstm_out)
+    lstm_out = Dropout(0.2)(lstm_out) # LayerNorm убран
+
+    # ИСПРАВЛЕННЫЙ ATTENTION: linear вместо tanh!
+    attention_scores = Dense(1, activation='linear')(lstm_out)
     attention_scores = Flatten()(attention_scores)
     attention_weights = Activation('softmax', name='attention_weights')(attention_scores)
-    lstm_att = Dot(axes=1)([attention_weights, lstm_out]) # Вектор 16
+    
+    # Вектор 16 (динамически взвешенный по времени)
+    lstm_att = Dot(axes=1)([attention_weights, lstm_out]) 
 
     # ==========================================
     # 🧬 СЛИЯНИЕ И ФИНАЛ
     # ==========================================
-    # Соединяем сигналы адаптивной CNN (24) и LSTM (16) = 40 признаков
+    # Склеиваем ветки (24 + 16 = 40 признаков)
     merged = Concatenate()([conv_out, lstm_att])
     
-    # Слегка увеличим плотный слой, чтобы переварить 40 признаков
+    # Здесь LayerNorm уместен, чтобы выровнять масштабы выходов CNN и LSTM перед финальным Dense
+    merged = LayerNormalization()(merged)
+    
     x = Dense(32, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(merged)
-    x = LayerNormalization()(x)
-    x = Dropout(0.2)(x)
+    x = Dropout(0.4)(x) # Усиленный dropout на "бутылочном горлышке"
     
     outputs = Dense(3, activation='softmax', name='out')(x)
     
