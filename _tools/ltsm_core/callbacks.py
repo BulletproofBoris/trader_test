@@ -1,8 +1,9 @@
-import os
 import time
+import h5py
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.callbacks import Callback
+import os
 
 class ElasticPatienceProfiler(Callback):
     def __init__(self, orchestrator, fold_name, max_epochs, bonus_ratio=0.1, min_delta=0.001,
@@ -175,3 +176,100 @@ class SmartBacktrackCallback(Callback):
                 self.wait = 0
                 
                 print(f"\n📉 [Backtrack] Откат к ЛУЧШИМ весам + СБРОС ADAM. Новый LR: {new_lr:.7f}")
+
+class FullTrajectoryTracker(Callback):
+    def __init__(self, filepath, compress_level=9):
+        super().__init__()
+        self.filepath = filepath
+        self.compress_level = compress_level
+        self.file = None
+        
+        # Ссылки на HDF5 датасеты
+        self.ds_weights = None
+        self.ds_loss = None
+        self.ds_val_loss = None
+        self.ds_acc = None
+        self.ds_val_acc = None
+        self.ds_lr = None
+
+    def on_train_begin(self, logs=None):
+        # Открываем файл в режиме 'a' (append/read-write). 
+        # Если файла нет - он создастся. Если есть - просто откроется.
+        self.file = h5py.File(self.filepath, 'a')
+        
+        # Получаем количество параметров модели для "заголовка"
+        dummy_weights = np.concatenate([w.flatten() for w in self.model.get_weights()])
+        num_params = len(dummy_weights)
+
+        # === 1. ПРОВЕРКА И ЗАПИСЬ "ЗАГОЛОВКА" ===
+        if 'metadata' not in self.file:
+            # Создаем пустую группу для заголовка, если это первый запуск
+            meta_group = self.file.create_group('metadata')
+            meta_group.attrs['num_parameters'] = num_params
+            meta_group.attrs['optimizer'] = self.model.optimizer.__class__.__name__
+        else:
+            # Если файл уже существует, проверяем, та ли это модель
+            saved_params = self.file['metadata'].attrs['num_parameters']
+            if saved_params != num_params:
+                print(f"⚠️ ВНИМАНИЕ: Размерность модели ({num_params}) не совпадает с кэшем ({saved_params})! Возможен конфликт.")
+
+        # === 2. ИНИЦИАЛИЗАЦИЯ ИЛИ ЗАГРУЗКА РЕЗИНОВЫХ МАССИВОВ ===
+        if 'trajectory' not in self.file:
+            traj_group = self.file.create_group('trajectory')
+            
+            # maxshape=(None, ...) означает, что массив может расти бесконечно
+            self.ds_weights = traj_group.create_dataset(
+                'weights', shape=(0, num_params), maxshape=(None, num_params), 
+                dtype='float16', chunks=True, compression='gzip', compression_opts=self.compress_level
+            )
+            self.ds_loss = traj_group.create_dataset('loss', shape=(0,), maxshape=(None,), dtype='float32')
+            self.ds_val_loss = traj_group.create_dataset('val_loss', shape=(0,), maxshape=(None,), dtype='float32')
+            self.ds_acc = traj_group.create_dataset('acc', shape=(0,), maxshape=(None,), dtype='float32')
+            self.ds_val_acc = traj_group.create_dataset('val_acc', shape=(0,), maxshape=(None,), dtype='float32')
+            self.ds_lr = traj_group.create_dataset('learning_rate', shape=(0,), maxshape=(None,), dtype='float32')
+        else:
+            # Подхватываем существующие датасеты, чтобы дописывать в них
+            traj_group = self.file['trajectory']
+            self.ds_weights = traj_group['weights']
+            self.ds_loss = traj_group['loss']
+            self.ds_val_loss = traj_group['val_loss']
+            self.ds_acc = traj_group['acc']
+            self.ds_val_acc = traj_group['val_acc']
+            self.ds_lr = traj_group['learning_rate']
+
+    def on_epoch_end(self, epoch, logs=None):
+        if logs is None:
+            logs = {}
+            
+        # 1. Извлекаем и сплющиваем веса
+        raw_weights = self.model.get_weights()
+        flat_weights = np.concatenate([w.flatten() for w in raw_weights]).astype(np.float16)
+
+        # 2. Достаем текущий Learning Rate (он может меняться твоим SmartBacktrackCallback)
+        current_lr = float(tf.keras.backend.get_value(self.model.optimizer.learning_rate))
+
+        # 3. Увеличиваем размер массивов на 1 строку
+        current_size = self.ds_weights.shape[0]
+        new_size = current_size + 1
+        
+        self.ds_weights.resize(new_size, axis=0)
+        self.ds_loss.resize(new_size, axis=0)
+        self.ds_val_loss.resize(new_size, axis=0)
+        self.ds_acc.resize(new_size, axis=0)
+        self.ds_val_acc.resize(new_size, axis=0)
+        self.ds_lr.resize(new_size, axis=0)
+
+        # 4. Записываем данные текущей эпохи в самый конец массива
+        self.ds_weights[current_size] = flat_weights
+        self.ds_loss[current_size] = logs.get('loss', 0.0)
+        self.ds_val_loss[current_size] = logs.get('val_loss', 0.0)
+        self.ds_acc[current_size] = logs.get('accuracy', logs.get('acc', 0.0))
+        self.ds_val_acc[current_size] = logs.get('val_accuracy', logs.get('val_acc', 0.0))
+        self.ds_lr[current_size] = current_lr
+
+        # Принудительно сбрасываем буфер на диск, чтобы при краше ничего не потерять
+        self.file.flush()
+
+    def on_train_end(self, logs=None):
+        if self.file:
+            self.file.close()

@@ -29,7 +29,7 @@ import tensorflow as tf
 # 1. Включаем кэширование компиляции XLA на диск
 os.environ['TF_XLA_FLAGS'] = "--tf_xla_persistent_cache_directory=./xla_cache"
 
-# 2. Жестко ограничиваем потоки для каждого воркера!
+# 2. Жестко ограничиваем потоки для каждого воркеров!
 num_cores = multiprocessing.cpu_count()
 workers_count = 16 # Твой MAX_WORKERS из bash-скрипта
 threads_per_worker = max(2, num_cores // workers_count)
@@ -62,7 +62,8 @@ if gpus:
 from ltsm_core.orchestrator import SmartOrchestrator
 from ltsm_core.data_loader import compute_class_weights_fast, load_tfrecord_dataset, count_tfrecord_samples
 from ltsm_core.model_builder import create_model, save_record_model
-from ltsm_core.callbacks import ElasticPatienceProfiler, SmartBacktrackCallback
+# ИСПРАВЛЕНО: Добавлен импорт FullTrajectoryTracker из вашего файла callbacks
+from ltsm_core.callbacks import ElasticPatienceProfiler, SmartBacktrackCallback, FullTrajectoryTracker
 from ltsm_core.math_utils import find_max_physical_batch, get_adaptive_batch_config
 
 from tensorflow.keras.callbacks import ModelCheckpoint
@@ -207,7 +208,7 @@ def main(args):
             
             model = create_model(seq_len, n_features, args.l2_reg)
             
-            # --- ИСПРАВЛЕНО: Безопасная инициализация Оптимизатора ---
+            # --- Безопасная инициализация Оптимизатора ---
             try:
                 # AdamW - современный стандарт со встроенным Weight Decay
                 optimizer = tf.keras.optimizers.AdamW(
@@ -239,11 +240,16 @@ def main(args):
             temp_weights_path = MODELS_DIR / f"temp_best_{run_id}.weights.h5"
             profiler = ElasticPatienceProfiler(orchestrator, args.fold, args.epochs, args.bonus_ratio, args.min_delta)
             
+            # ИСПРАВЛЕНО: Генерация пути для сохранения HDF5 файла ландшафта и инициализация трекера
+            landscape_path = MODELS_DIR / f"landscape_{run_id}.h5"
+            trajectory_tracker = FullTrajectoryTracker(filepath=str(landscape_path))
+            
             callbacks = [
                 ModelCheckpoint(filepath=temp_weights_path, save_weights_only=True, monitor='val_loss', mode='min', save_best_only=True, verbose=0),
                 SmartBacktrackCallback(best_weights_path=temp_weights_path, monitor_loss='val_loss', factor=args.factor, patience=args.patience, min_lr=1e-5),
                 tf.keras.callbacks.TerminateOnNaN(),
-                profiler
+                profiler,
+                trajectory_tracker # <--- ИСПРАВЛЕНО: Добавлен «бортовой самописец» в общий пул коллбеков
             ]
 
             try:
