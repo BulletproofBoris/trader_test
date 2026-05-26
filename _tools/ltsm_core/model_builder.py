@@ -34,14 +34,14 @@ def create_model(seq_len, n_features, l2_reg):
     kernel_4 = max(1, math.ceil(seq_len * p * 7))
     
     # Убрали лишние LayerNorm, добавили Dropout для регуляризации фильтров
-    conv_1 = Conv1D(filters=f, kernel_size=kernel_1, padding='same', activation='relu')(x)
-    conv_2 = Conv1D(filters=f, kernel_size=kernel_2, padding='same', activation='relu')(x)
+    conv_1 = Conv1D(filters=f, kernel_size=kernel_1, padding='causal', activation='relu')(x)
+    conv_2 = Conv1D(filters=f, kernel_size=kernel_2, padding='causal', activation='relu')(x)
 
-    conv_3 = Conv1D(filters=f, kernel_size=kernel_3, padding='same', activation='relu')(conv_1)
+    conv_3 = Conv1D(filters=f, kernel_size=kernel_3, padding='causal', activation='relu')(conv_1)
     # Используем AveragePooling вместо Max, чтобы сохранить усредненный фон паттерна, а не выброс
     conv_3_pool = GlobalAveragePooling1D()(conv_3) 
 
-    conv_4 = Conv1D(filters=f, kernel_size=kernel_4, padding='same', activation='relu')(conv_2)
+    conv_4 = Conv1D(filters=f, kernel_size=kernel_4, padding='causal', activation='relu')(conv_2)
     conv_4_pool = GlobalAveragePooling1D()(conv_4)
 
     # Вектор 24
