@@ -28,6 +28,9 @@ def main():
     parser.add_argument("--append", action="store_true", help="Дообучать поверх существующих моделей")
     parser.add_argument("--force", action="store_true", help="Очистить папку с моделями перед стартом")
 
+    # ✅ НОВЫЙ ФЛАГ ДЛЯ ЗАПИСИ ТРАЕКТОРИИ
+    parser.add_argument("--track_trajectory", action="store_true", help="Включить запись траектории весов (landscape_*.h5)")
+
     args = parser.parse_args()
 
     DATASET_DIR = Path(args.dataset_dir)
@@ -88,6 +91,10 @@ def main():
                 cmd.append("--append")
             if args.force:
                 cmd.append("--force")
+            
+            # ✅ ПРОБРОС ФЛАГА ЗАПИСИ ТРАЕКТОРИИ
+            if args.track_trajectory:
+                cmd.append("--track_trajectory")
                 
             # ПРАВИЛЬНОЕ ДОБАВЛЕНИЕ PCA
             if args.init_pca_coord is not None:

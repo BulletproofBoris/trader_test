@@ -26,7 +26,7 @@ def create_model(seq_len, n_features, l2_reg):
     # ==========================================
     # ⚡ ВЕТКА 1: АДАПТИВНЫЙ ИМПУЛЬС (CNN)
     # ==========================================
-    p = 0.1
+    p = 1
     f = 12
     kernel_1 = max(1, math.ceil(seq_len * p * 1))
     kernel_2 = max(1, math.ceil(seq_len * p * 3))
@@ -51,10 +51,10 @@ def create_model(seq_len, n_features, l2_reg):
     # 🧠 ВЕТКА 2: ГЛУБОКИЙ КОНТЕКСТ (LSTM + Attention)
     # ==========================================
     lstm = LSTM(32, return_sequences=True, kernel_regularizer=regularizers.l2(l2_reg))(x)
-    lstm = Dropout(0.05)(lstm) # LayerNorm убран
+    lstm = Dropout(0.1)(lstm)
 
     lstm_out = LSTM(16, return_sequences=True, kernel_regularizer=regularizers.l2(l2_reg))(lstm)
-    lstm_out = Dropout(0.05)(lstm_out) # LayerNorm убран
+    lstm_out = Dropout(0.1)(lstm_out)
 
     # ИСПРАВЛЕННЫЙ ATTENTION: linear вместо tanh!
     attention_scores = Dense(1, activation='linear')(lstm_out)
@@ -62,7 +62,7 @@ def create_model(seq_len, n_features, l2_reg):
     attention_weights = Activation('softmax', name='attention_weights')(attention_scores)
     
     # Вектор 16 (динамически взвешенный по времени)
-    lstm_att = Dot(axes=1)([attention_weights, lstm_out]) 
+    lstm_att = Dot(axes=1)([attention_weights, lstm_out])
 
     # ==========================================
     # 🧬 СЛИЯНИЕ И ФИНАЛ
@@ -74,7 +74,7 @@ def create_model(seq_len, n_features, l2_reg):
     merged = LayerNormalization()(merged)
     
     x = Dense(32, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(merged)
-    x = Dropout(0.2)(x) # Усиленный dropout на "бутылочном горлышке"
+    x = Dropout(0.4)(x)
     
     outputs = Dense(3, activation='softmax', name='out')(x)
     

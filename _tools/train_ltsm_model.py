@@ -208,13 +208,6 @@ def main(args):
             
             model = create_model(seq_len, n_features, args.l2_reg)
             
-            try:
-                ctypes.CDLL("libc.so.6").malloc_trim(0)
-            except Exception:
-                pass
-            
-            model = create_model(seq_len, n_features, args.l2_reg)
-            
             # ---- ВСТАВКА ДЛЯ PCA ИНИЦИАЛИЗАЦИИ ----
             if args.init_pca_coord is not None:
                 trajectories_dir = FOLD_DIR / "models" / "trajectories"
@@ -257,17 +250,27 @@ def main(args):
             temp_weights_path = MODELS_DIR / f"temp_best_{run_id}.weights.h5"
             profiler = ElasticPatienceProfiler(orchestrator, args.fold, args.epochs, args.bonus_ratio, args.min_delta)
             
-            # ИСПРАВЛЕНО: Генерация пути для сохранения HDF5 файла ландшафта и инициализация трекера
-            landscape_path = MODELS_DIR / f"landscape_{run_id}.h5"
-            trajectory_tracker = FullTrajectoryTracker(filepath=str(landscape_path))
-            
+            # Базовые коллбеки, которые работают всегда
             callbacks = [
                 ModelCheckpoint(filepath=temp_weights_path, save_weights_only=True, monitor='val_loss', mode='min', save_best_only=True, verbose=0),
                 SmartBacktrackCallback(best_weights_path=temp_weights_path, monitor_loss='val_loss', factor=args.factor, patience=args.patience, min_lr=1e-5),
                 tf.keras.callbacks.TerminateOnNaN(),
-                profiler,
-                trajectory_tracker # <--- ИСПРАВЛЕНО: Добавлен «бортовой самописец» в общий пул коллбеков
+                profiler
             ]
+
+            # ---- КЛЮЧЕВАЯ ПРОВЕРКА ФЛАГА ----
+            if args.track_trajectory:
+                # Используем выделенную подпапку trajectories
+                traj_dir = MODELS_DIR / "trajectories"
+                traj_dir.mkdir(parents=True, exist_ok=True)
+                
+                landscape_path = traj_dir / f"landscape_{run_id}.h5"
+                trajectory_tracker = FullTrajectoryTracker(filepath=str(landscape_path))
+                
+                callbacks.append(trajectory_tracker)
+                print(f"📊 [Самописец] Запись траектории активирована: {landscape_path.name}")
+            else:
+                print("ℹ️ [Самописец] Запись траекторий отключена (экономия места и дискового I/O).")
 
             try:
                 history = model.fit(train_dataset, epochs=args.epochs, validation_data=val_dataset, callbacks=callbacks, class_weight=class_weights_dict, verbose=2)
@@ -397,5 +400,7 @@ if __name__ == "__main__":
                         help="Координаты PCA для принудительной посадки модели (например: -100.0 120.0)")
     parser.add_argument("--init_pca_radius", type=float, default=0.0,
                         help="Радиус (величина окрестности) разброса вокруг указанных координат PCA")
+    parser.add_argument("--track_trajectory", action="store_true",
+                        help="Включить запись траектории весов (landscape_*.h5) для анализа ландшафта потерь")
     args = parser.parse_args()
     main(args)
