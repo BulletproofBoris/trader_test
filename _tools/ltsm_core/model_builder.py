@@ -26,7 +26,7 @@ def create_model(seq_len, n_features, l2_reg):
     # ==========================================
     # ⚡ ВЕТКА 1: АДАПТИВНЫЙ ИМПУЛЬС (CNN)
     # ==========================================
-    p = 0.05 * seq_len
+    p = 0.1 * seq_len
     f = 12
     kernel_1 = max(1, math.ceil(p * 1))
     kernel_2 = max(2, math.ceil(p * 2))
