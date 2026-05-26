@@ -51,10 +51,10 @@ def create_model(seq_len, n_features, l2_reg):
     # 🧠 ВЕТКА 2: ГЛУБОКИЙ КОНТЕКСТ (LSTM + Attention)
     # ==========================================
     lstm = LSTM(32, return_sequences=True, kernel_regularizer=regularizers.l2(l2_reg))(x)
-    lstm = Dropout(0.1)(lstm)
+    lstm = Dropout(0.05)(lstm)
 
     lstm_out = LSTM(16, return_sequences=True, kernel_regularizer=regularizers.l2(l2_reg))(lstm)
-    lstm_out = Dropout(0.1)(lstm_out)
+    lstm_out = Dropout(0.05)(lstm_out)
 
     # ИСПРАВЛЕННЫЙ ATTENTION: linear вместо tanh!
     attention_scores = Dense(1, activation='linear')(lstm_out)
@@ -74,7 +74,7 @@ def create_model(seq_len, n_features, l2_reg):
     merged = LayerNormalization()(merged)
     
     x = Dense(32, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(merged)
-    x = Dropout(0.4)(x)
+    x = Dropout(0.2)(x)
     
     outputs = Dense(3, activation='softmax', name='out')(x)
     
