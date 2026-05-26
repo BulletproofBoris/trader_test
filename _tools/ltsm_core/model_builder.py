@@ -29,9 +29,9 @@ def create_model(seq_len, n_features, l2_reg):
     p = 0.05 * seq_len
     f = 12
     kernel_1 = max(1, math.ceil(p * 1))
-    kernel_2 = max(2, math.ceil(p * 3))
-    kernel_3 = max(3, math.ceil(p * 5))
-    kernel_4 = max(4, math.ceil(p * 7))
+    kernel_2 = max(2, math.ceil(p * 2))
+    kernel_3 = max(3, math.ceil(p * 3))
+    kernel_4 = max(4, math.ceil(p * 4))
     
     # Убрали лишние LayerNorm, добавили Dropout для регуляризации фильтров
     conv_1 = Conv1D(filters=f, kernel_size=kernel_1, padding='causal', activation='relu')(x)
