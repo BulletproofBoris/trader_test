@@ -2,50 +2,57 @@ import json
 from pathlib import Path
 import math
 import tensorflow as tf
-from tensorflow.keras.layers import Input, LayerNormalization, Conv1D, GlobalAveragePooling1D, GaussianNoise, GRU
-from tensorflow.keras.layers import GlobalMaxPooling1D, Concatenate, LSTM, Dropout, Dense, Flatten, Activation, Dot, Lambda
+from tensorflow.keras.layers import Input, Dense, Dropout, LayerNormalization, Conv1D, GaussianNoise, GRU, Multiply, GlobalAveragePooling1D, Reshape
 from tensorflow.keras.models import Model
 from tensorflow.keras import regularizers
 
 def create_model(seq_len, n_features, l2_reg):
     """
-    Итерация 6a: Авто-экстрактор фичей (1x1 Conv) + GRU
-    Цель: Очистить 68 признаков от шума ДО того, как они попадут в GRU.
+    Итерация 8: 1x1 Conv + SE-Блок + GRU
+    Цель: Научить сеть динамически "фокусироваться" на самых важных 
+    мета-признаках перед тем, как отдать их в GRU.
     """
     inputs = Input(shape=(seq_len, n_features), name="input_layer")
     x = GaussianNoise(0.01)(inputs)
     x = LayerNormalization()(x)
 
-    # ==========================================
-    # 🧹 ФИЛЬТР ПРИЗНАКОВ (Свертка 1x1)
-    # ==========================================
-    # kernel_size=1 означает, что мы смотрим только на 1 день за раз.
-    # filters=16 заставляет сеть сжать 68 сырых колонок в 16 самых важных.
-    # Это математический аналог алгоритма PCA (Метод главных компонент), но обучаемый!
-    x = Conv1D(
+    # 1. ФИЛЬТР ПРИЗНАКОВ (Bottleneck)
+    # Сжимаем 68 фичей в 16 чистых сигналов
+    encoded = Conv1D(
         filters=16, 
         kernel_size=1, 
         activation='gelu', 
-        kernel_regularizer=regularizers.l2(l2_reg),
-        name="feature_bottleneck"
+        kernel_regularizer=regularizers.l2(l2_reg)
     )(x)
 
     # ==========================================
-    # 🧠 ВРЕМЕННОЙ АНАЛИЗ (GRU)
+    # 🌟 SQUEEZE-AND-EXCITATION (SE) БЛОК 
     # ==========================================
-    # Теперь GRU дышится легко: на вход поступает всего 16 очищенных признаков,
-    # и он может сосредоточиться на поиске тренда за 6 дней.
+    # Squeeze: Сжимаем каждый из 16 каналов в одно число (оцениваем его общую силу)
+    se = GlobalAveragePooling1D()(encoded)
+    
+    # Excitation: Пропускаем через маленькую нейросеть, чтобы вычислить веса для каждого канала
+    se = Dense(8, activation='relu', kernel_regularizer=regularizers.l2(l2_reg))(se)
+    se = Dense(16, activation='sigmoid')(se) # Sigmoid даст проценты от 0 до 1 (громкость канала)
+    
+    # Меняем форму, чтобы можно было умножить на наши данные
+    se = Reshape((1, 16))(se)
+    
+    # Применяем "эквалайзер": умножаем данные на вычисленную громкость
+    encoded_se = Multiply()([encoded, se])
+    # ==========================================
+
+    # 2. ВРЕМЕННОЙ АНАЛИЗ (GRU)
+    # Теперь GRU получает не просто 16 признаков, а 16 признаков с ПРАВИЛЬНОЙ громкостью
     x = GRU(
-        units=32, # Память тоже можно сделать меньше, так как данные стали чище
+        units=32, 
         return_sequences=False, 
-        kernel_regularizer=regularizers.l2(l2_reg),
-        name="gru_temporal"
-    )(x)
-    x = Dropout(0.1)(x)
+        kernel_regularizer=regularizers.l2(l2_reg)
+    )(encoded_se)
+    
+    x = Dropout(0.1)(x) # Держим Dropout низким, данные очень чистые!
 
-    # ==========================================
-    # 🎯 ПРИНЯТИЕ РЕШЕНИЯ
-    # ==========================================
+    # 3. ФИНАЛЬНЫЙ ВЫВОД
     x = Dense(32, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(x)
     x = Dropout(0.1)(x)
     
