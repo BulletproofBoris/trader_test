@@ -27,7 +27,7 @@ os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
 import tensorflow as tf
 
 # 1. Включаем кэширование компиляции XLA на диск
-os.environ['TF_XLA_FLAGS'] = "--tf_xla_persistent_cache_directory=./xla_cache"
+#os.environ['TF_XLA_FLAGS'] = "--tf_xla_persistent_cache_directory=./xla_cache"
 
 # 2. Жестко ограничиваем потоки для каждого воркеров!
 num_cores = multiprocessing.cpu_count()

@@ -24,6 +24,8 @@ data/*
 
 !data/raw
 
+/home/restorator/trader_test/xla_cache/*
+
 # 2. Разрешаем Git спускаться по дереву папок до нужного уровня
 !data/processed/
 data/processed/*
