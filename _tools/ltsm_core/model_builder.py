@@ -9,36 +9,45 @@ from tensorflow.keras import regularizers
 
 def create_model(seq_len, n_features, l2_reg):
     """
-    Итерация 5: GRU + Прямой доступ к настоящему (Skip Connection)
-    Цель: Сохранить победную логику GRU, но дать классификатору 
-    неискаженный слепок рынка в самый последний день (День 6).
+    Итерация 6a: Авто-экстрактор фичей (1x1 Conv) + GRU
+    Цель: Очистить 68 признаков от шума ДО того, как они попадут в GRU.
     """
     inputs = Input(shape=(seq_len, n_features), name="input_layer")
     x = GaussianNoise(0.01)(inputs)
     x = LayerNormalization()(x)
 
-    # 1. ВЕТКА 1: Контекст от GRU (Как в успешной Итерации 3)
-    # Выдает сжатый вектор тренда (размер 64)
-    gru_context = GRU(
-        units=64, 
+    # ==========================================
+    # 🧹 ФИЛЬТР ПРИЗНАКОВ (Свертка 1x1)
+    # ==========================================
+    # kernel_size=1 означает, что мы смотрим только на 1 день за раз.
+    # filters=16 заставляет сеть сжать 68 сырых колонок в 16 самых важных.
+    # Это математический аналог алгоритма PCA (Метод главных компонент), но обучаемый!
+    x = Conv1D(
+        filters=16, 
+        kernel_size=1, 
+        activation='gelu', 
+        kernel_regularizer=regularizers.l2(l2_reg),
+        name="feature_bottleneck"
+    )(x)
+
+    # ==========================================
+    # 🧠 ВРЕМЕННОЙ АНАЛИЗ (GRU)
+    # ==========================================
+    # Теперь GRU дышится легко: на вход поступает всего 16 очищенных признаков,
+    # и он может сосредоточиться на поиске тренда за 6 дней.
+    x = GRU(
+        units=32, # Память тоже можно сделать меньше, так как данные стали чище
         return_sequences=False, 
         kernel_regularizer=regularizers.l2(l2_reg),
-        name="gru_trend"
+        name="gru_temporal"
     )(x)
-    gru_context = Dropout(0.3)(gru_context)
+    x = Dropout(0.1)(x)
 
-    # 2. ВЕТКА 2: "Прямой Провод" (Shortcut) к Дню 6
-    # С помощью Lambda берем только последнюю строку из 6 дней
-    # Выдает сырые, неискаженные признаки сегодняшнего дня (размер ~68)
-    today_raw = Lambda(lambda s: s[:, -1, :], name="today_shortcut")(x)
-
-    # 3. Слияние: Тренд + Текущая реальность
-    # Склеиваем 64 признака от GRU и ~68 сырых признаков Дня 6
-    merged = Concatenate(name="fusion")([gru_context, today_raw])
-
-    # 4. Принятие решения
-    x = Dense(64, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(merged)
-    x = Dropout(0.3)(x) # Чуть усилили Dropout на горлышке из-за увеличения данных
+    # ==========================================
+    # 🎯 ПРИНЯТИЕ РЕШЕНИЯ
+    # ==========================================
+    x = Dense(32, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(x)
+    x = Dropout(0.1)(x)
     
     outputs = Dense(3, activation='softmax', name='out')(x)
     
