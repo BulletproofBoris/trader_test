@@ -7,52 +7,29 @@ from tensorflow.keras.models import Model
 from tensorflow.keras import regularizers
 
 def create_model(seq_len, n_features, l2_reg):
-    """
-    Итерация 8: 1x1 Conv + SE-Блок + GRU
-    Цель: Научить сеть динамически "фокусироваться" на самых важных 
-    мета-признаках перед тем, как отдать их в GRU.
-    """
     inputs = Input(shape=(seq_len, n_features), name="input_layer")
     x = GaussianNoise(0.01)(inputs)
     x = LayerNormalization()(x)
 
-    # 1. ФИЛЬТР ПРИЗНАКОВ (Bottleneck)
-    # Сжимаем 68 фичей в 16 чистых сигналов
-    encoded = Conv1D(
+    # 1. Bottleneck: Сжимаем 68 признаков в 16 самых важных
+    x = Conv1D(
         filters=16, 
         kernel_size=1, 
         activation='gelu', 
-        kernel_regularizer=regularizers.l2(l2_reg)
+        kernel_regularizer=regularizers.l2(l2_reg),
+        name="feature_bottleneck"
     )(x)
 
-    # ==========================================
-    # 🌟 SQUEEZE-AND-EXCITATION (SE) БЛОК 
-    # ==========================================
-    # Squeeze: Сжимаем каждый из 16 каналов в одно число (оцениваем его общую силу)
-    se = GlobalAveragePooling1D()(encoded)
-    
-    # Excitation: Пропускаем через маленькую нейросеть, чтобы вычислить веса для каждого канала
-    se = Dense(8, activation='relu', kernel_regularizer=regularizers.l2(l2_reg))(se)
-    se = Dense(16, activation='sigmoid')(se) # Sigmoid даст проценты от 0 до 1 (громкость канала)
-    
-    # Меняем форму, чтобы можно было умножить на наши данные
-    se = Reshape((1, 16))(se)
-    
-    # Применяем "эквалайзер": умножаем данные на вычисленную громкость
-    encoded_se = Multiply()([encoded, se])
-    # ==========================================
-
-    # 2. ВРЕМЕННОЙ АНАЛИЗ (GRU)
-    # Теперь GRU получает не просто 16 признаков, а 16 признаков с ПРАВИЛЬНОЙ громкостью
+    # 2. GRU: Временной анализ чистых данных
     x = GRU(
         units=32, 
         return_sequences=False, 
-        kernel_regularizer=regularizers.l2(l2_reg)
-    )(encoded_se)
-    
-    x = Dropout(0.1)(x) # Держим Dropout низким, данные очень чистые!
+        kernel_regularizer=regularizers.l2(l2_reg),
+        name="gru_temporal"
+    )(x)
+    x = Dropout(0.1)(x)
 
-    # 3. ФИНАЛЬНЫЙ ВЫВОД
+    # 3. Финальный классификатор
     x = Dense(32, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(x)
     x = Dropout(0.1)(x)
     
