@@ -9,31 +9,37 @@ from tensorflow.keras import regularizers
 
 def create_model(seq_len, n_features, l2_reg):
     """
-    Итерация 3: Рекуррентная сеть (GRU)
-    Цель: Обработать 6 дней последовательно, сделав максимальный акцент на последние дни.
+    Итерация 5: GRU + Прямой доступ к настоящему (Skip Connection)
+    Цель: Сохранить победную логику GRU, но дать классификатору 
+    неискаженный слепок рынка в самый последний день (День 6).
     """
     inputs = Input(shape=(seq_len, n_features), name="input_layer")
-    
-    # 1. Защита от зубрежки (оставляем, так как фичей много - ~68)
     x = GaussianNoise(0.01)(inputs)
     x = LayerNormalization()(x)
 
-    # 2. Чтение последовательности через GRU
-    # return_sequences=False означает, что GRU прочитает все 6 дней, 
-    # но выдаст нам только один финальный вектор (вывод после прочтения 6-го дня).
-    # 64 юнита - достаточное сжатие для 68 фичей.
-    x = GRU(
+    # 1. ВЕТКА 1: Контекст от GRU (Как в успешной Итерации 3)
+    # Выдает сжатый вектор тренда (размер 64)
+    gru_context = GRU(
         units=64, 
         return_sequences=False, 
-        kernel_regularizer=regularizers.l2(l2_reg)
+        kernel_regularizer=regularizers.l2(l2_reg),
+        name="gru_trend"
     )(x)
-    x = Dropout(0.2)(x)
+    gru_context = Dropout(0.3)(gru_context)
 
-    # 3. Принятие решения
-    x = Dense(32, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(x)
-    x = Dropout(0.2)(x)
+    # 2. ВЕТКА 2: "Прямой Провод" (Shortcut) к Дню 6
+    # С помощью Lambda берем только последнюю строку из 6 дней
+    # Выдает сырые, неискаженные признаки сегодняшнего дня (размер ~68)
+    today_raw = Lambda(lambda s: s[:, -1, :], name="today_shortcut")(x)
+
+    # 3. Слияние: Тренд + Текущая реальность
+    # Склеиваем 64 признака от GRU и ~68 сырых признаков Дня 6
+    merged = Concatenate(name="fusion")([gru_context, today_raw])
+
+    # 4. Принятие решения
+    x = Dense(64, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(merged)
+    x = Dropout(0.3)(x) # Чуть усилили Dropout на горлышке из-за увеличения данных
     
-    # 4. Выход на 3 класса
     outputs = Dense(3, activation='softmax', name='out')(x)
     
     return Model(inputs=inputs, outputs=outputs)
