@@ -1,10 +1,10 @@
 import json
 from pathlib import Path
 import tensorflow as tf
-from tensorflow.keras.layers import Input, Dense, Dropout, LayerNormalization, LSTM, Flatten, Activation, Dot, Conv1D, GlobalAveragePooling1D, Concatenate,Reshape, Multiply
+import math
+from tensorflow.keras.layers import Input, LayerNormalization, Conv1D, GlobalAveragePooling1D, GlobalMaxPooling1D, Concatenate, LSTM, Dropout, Dense, Flatten, Activation, Dot, Lambda
 from tensorflow.keras.models import Model
 from tensorflow.keras import regularizers
-import math
 
 def se_block(input_tensor, reduction=4):
     channels = input_tensor.shape[-1]
@@ -19,33 +19,30 @@ def se_block(input_tensor, reduction=4):
 
 def create_model(seq_len, n_features, l2_reg):
     inputs = Input(shape=(seq_len, n_features), name="input_layer")
-    
-    # Нормализуем сырой вход
     x = LayerNormalization()(inputs)
 
     # ==========================================
     # ⚡ ВЕТКА 1: АДАПТИВНЫЙ ИМПУЛЬС (CNN)
     # ==========================================
-    p = 0.1 * seq_len
-    f = 12
+    p = 0.05 * seq_len
+    base_filters = min(128, max(32, int(n_features * 1.5)))
     kernel_1 = max(1, math.ceil(p * 1))
     kernel_2 = max(2, math.ceil(p * 2))
     kernel_3 = max(3, math.ceil(p * 3))
     kernel_4 = max(4, math.ceil(p * 4))
     
-    # Убрали лишние LayerNorm, добавили Dropout для регуляризации фильтров
-    conv_1 = Conv1D(filters=f, kernel_size=kernel_1, padding='causal', activation='relu')(x)
-    conv_2 = Conv1D(filters=f, kernel_size=kernel_2, padding='causal', activation='relu')(x)
+    conv_1 = Conv1D(filters=base_filters, kernel_size=kernel_1, padding='causal', activation='relu')(x)
+    conv_2 = Conv1D(filters=base_filters, kernel_size=kernel_2, padding='causal', activation='relu')(x)
 
-    conv_3 = Conv1D(filters=f, kernel_size=kernel_3, padding='causal', activation='relu')(conv_1)
-    # Используем AveragePooling вместо Max, чтобы сохранить усредненный фон паттерна, а не выброс
-    conv_3_pool = GlobalAveragePooling1D()(conv_3) 
+    conv_3 = Conv1D(filters=base_filters, kernel_size=kernel_3, padding='causal', activation='relu')(conv_1)
+    c3_last = Lambda(lambda s: s[:, -1, :])(conv_3)
+    c3 = GlobalAveragePooling1D()(c3_last)
 
-    conv_4 = Conv1D(filters=f, kernel_size=kernel_4, padding='causal', activation='relu')(conv_2)
-    conv_4_pool = GlobalAveragePooling1D()(conv_4)
+    conv_4 = Conv1D(filters=base_filters, kernel_size=kernel_4, padding='causal', activation='relu')(conv_2)
+    c4_last = Lambda(lambda s: s[:, -1, :])(conv_4)
+    c4 = GlobalAveragePooling1D()(c4_last)
 
-    # Вектор 24
-    conv_out = Concatenate()([conv_3_pool, conv_4_pool]) 
+    conv_out = Concatenate()([c3, c4]) 
 
     # ==========================================
     # 🧠 ВЕТКА 2: ГЛУБОКИЙ КОНТЕКСТ (LSTM + Attention)
@@ -56,26 +53,17 @@ def create_model(seq_len, n_features, l2_reg):
     lstm_out = LSTM(16, return_sequences=True, kernel_regularizer=regularizers.l2(l2_reg))(lstm)
     lstm_out = Dropout(0.05)(lstm_out)
 
-    # ИСПРАВЛЕННЫЙ ATTENTION: linear вместо tanh!
     attention_scores = Dense(1, activation='linear')(lstm_out)
     attention_scores = Flatten()(attention_scores)
     attention_weights = Activation('softmax', name='attention_weights')(attention_scores)
     
-    # Вектор 16 (динамически взвешенный по времени)
     lstm_att = Dot(axes=1)([attention_weights, lstm_out])
 
-    # ==========================================
-    # 🧬 СЛИЯНИЕ И ФИНАЛ
-    # ==========================================
-    # Склеиваем ветки (24 + 16 = 40 признаков)
     merged = Concatenate()([conv_out, lstm_att])
-    
-    # Здесь LayerNorm уместен, чтобы выровнять масштабы выходов CNN и LSTM перед финальным Dense
     merged = LayerNormalization()(merged)
     
     x = Dense(32, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(merged)
     x = Dropout(0.2)(x)
-    
     outputs = Dense(3, activation='softmax', name='out')(x)
     
     return Model(inputs=inputs, outputs=outputs)
