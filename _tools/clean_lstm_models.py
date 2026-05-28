@@ -7,7 +7,7 @@ def main():
     parser = argparse.ArgumentParser(description="Глобальная очистка моделей и логов с подробным отчетом")
     parser.add_argument("--base_dir", type=str, default="data/processed", help="Путь к базовой папке с моделями")
     parser.add_argument("--logs_dir", type=str, default=".", help="Папка, где лежат лог-файлы (по умолчанию текущая)")
-    parser.add_argument("--keep", type=int, default=3, help="Сколько лучших моделей оставить")
+    parser.add_argument("--keep", type=int, default=5, help="Сколько лучших моделей оставить")
     args = parser.parse_args()
     
     base_dir = Path(args.base_dir)

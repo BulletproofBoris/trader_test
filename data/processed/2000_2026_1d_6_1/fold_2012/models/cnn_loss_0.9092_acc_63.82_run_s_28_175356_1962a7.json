@@ -1,0 +1,16 @@
+{
+    "model_name": "cnn_loss_0.9092_acc_63.82_run_s_28_175356_1962a7.keras",
+    "arch": "cnn",
+    "run_id": "run_s_28_175356_1962a7",
+    "dataset": "2000_2026_1d_6_1",
+    "fold": "fold_2012",
+    "seq_len": 6,
+    "n_features": 68,
+    "metrics": {
+        "val_loss": 0.9092145562171936,
+        "val_acc": 63.81899118423462
+    },
+    "training_stats": {
+        "training_time_seconds": 25.51522707939148
+    }
+}
