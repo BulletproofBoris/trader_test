@@ -31,6 +31,8 @@ def main():
     # ✅ НОВЫЙ ФЛАГ ДЛЯ ЗАПИСИ ТРАЕКТОРИИ
     parser.add_argument("--track_trajectory", action="store_true", help="Включить запись траектории весов (landscape_*.h5)")
 
+    parser.add_argument("--arch", type=str, default="conv1d+gru", help="Какую архитектуру учить (conv1d+gru, cnn)")
+
     args = parser.parse_args()
 
     DATASET_DIR = Path(args.dataset_dir)
@@ -74,6 +76,7 @@ def main():
             
             cmd = [
                 "python", script_path,
+                "--arch", args.arch,
                 "--dataset_dir", str(DATASET_DIR),
                 "--fold", fold_name,
                 "--runs", str(args.runs),

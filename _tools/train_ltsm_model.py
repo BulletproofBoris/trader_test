@@ -121,7 +121,7 @@ def main(args):
             
             print(f"\n🔍 [Worker {os.getpid()}] Начинаю тест VRAM (Остальные ждут)...")
             ideal_logical, _, _ = get_adaptive_batch_config(num_train_samples, max_phys_batch=999999)
-            max_phys_batch = find_max_physical_batch(create_model, seq_len, n_features, start_batch=ideal_logical)
+            max_phys_batch = find_max_physical_batch(lambda sl, nf, l2: create_model(args.arch, sl, nf, l2), seq_len, n_features, start_batch=ideal_logical)
             logical_batch, phys_batch, accum_steps = get_adaptive_batch_config(num_train_samples, max_phys_batch)
             
             with open(batch_config_path, 'w', encoding='utf-8') as f:
@@ -183,7 +183,7 @@ def main(args):
 
             # 🌟 ДИНАМИЧЕСКИЙ ПОРОГ ДЛЯ ТОП-3
             swarm_id = os.environ.get("SWARM_ID", "manual")
-            saving_threshold = orchestrator.get_saving_threshold(args.fold, keep=10)
+            saving_threshold = orchestrator.get_saving_threshold(args.fold, arch=args.arch, keep=10)
             
             if saving_threshold == float('inf'):
                 target_str = "Заполнение Топ-3 пула"
@@ -195,7 +195,7 @@ def main(args):
             
             run_hash = hashlib.md5(f'{time.time()}_{np.random.randint(1000)}'.encode()).hexdigest()[:6]
             run_id = f"run_{swarm_id}_{run_hash}"
-            hyperparams = {"lr": args.lr, "logical_batch": logical_batch, "phys_batch": phys_batch, "l2": args.l2_reg}
+            hyperparams = {"arch": args.arch, "lr": args.lr, "logical_batch": logical_batch, "phys_batch": phys_batch, "l2": args.l2_reg}
             orchestrator.register_run_start(run_id, Path(args.dataset_dir).name, args.fold, hyperparams)
             
             tf.keras.backend.clear_session()
@@ -206,7 +206,7 @@ def main(args):
             except Exception:
                 pass
             
-            model = create_model(seq_len, n_features, args.l2_reg)
+            model = create_model(args.arch, seq_len, n_features, args.l2_reg)
             
             # ---- ВСТАВКА ДЛЯ PCA ИНИЦИАЛИЗАЦИИ ----
             if args.init_pca_coord is not None:
@@ -286,7 +286,7 @@ def main(args):
             status = 'PRUNED' if profiler.pruned else 'COMPLETED'
             
             # 1. СНАЧАЛА узнаем проходной балл (пока база не обновилась!)
-            final_threshold = orchestrator.get_saving_threshold(args.fold, keep=10)
+            final_threshold = orchestrator.get_saving_threshold(args.fold, arch=args.arch, keep=10)
             
             # 2. ЗАТЕМ записываем наш новый результат в базу
             orchestrator.register_run_end(
@@ -300,7 +300,7 @@ def main(args):
                 print(f"\n🎯 Итог итерации {current_run}: Val Loss = {loss:.4f} | Val Acc = {acc*100:.2f}%")
                 
                 if loss < final_threshold:
-                    save_record_model(model, history, acc, loss, profiler.total_ttc, run_id, Path(args.dataset_dir).name, args.fold, seq_len, n_features, MODELS_DIR)
+                    save_record_model(model, history, acc, loss, profiler.total_ttc, run_id, Path(args.dataset_dir).name, args.fold, seq_len, n_features, MODELS_DIR, args.arch)
                     if loss < global_best_loss:
                         print(f"🏆 АБСОЛЮТНЫЙ РЕКОРД! Модель сохранена на 1-е место!")
                     else:
@@ -403,5 +403,6 @@ if __name__ == "__main__":
     parser.add_argument("--track_trajectory", action="store_true",
                         help="Включить запись траектории весов (landscape_*.h5) для анализа ландшафта потерь")
     parser.add_argument("--arch", type=str, default="6a", help="Название архитектуры (6a, cnn, mlp)")
+    parser.add_argument("--arch", type=str, default="conv1d+gru", help="Архитектура модели (conv1d+gru, cnn)")
     args = parser.parse_args()
     main(args)

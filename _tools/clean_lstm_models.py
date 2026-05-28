@@ -90,6 +90,7 @@ def main():
                 val_loss = float('inf')
                 val_acc = 0.0
                 run_id = "?"
+                arch = "legacy" # По умолчанию, если файл старый
                 
                 if json_file.exists():
                     try:
@@ -100,13 +101,28 @@ def main():
                                 val_loss = float(meta["metrics"].get("val_loss", float('inf')))
                                 val_acc = float(meta["metrics"].get("val_acc", 0.0))
                             run_id = meta.get("run_id", "?")
+                            # Извлекаем архитектуру (если ее нет, используем префикс файла)
+                            arch = meta.get("arch", m_file.name.split('_')[0]) 
                     except Exception: pass
                 
-                valid_models.append({"path": m_file, "json": json_file, "loss": val_loss, "acc": val_acc, "run": run_id})
+                valid_models.append({"path": m_file, "json": json_file, "loss": val_loss, "acc": val_acc, "run": run_id, "arch": arch})
 
-            valid_models.sort(key=lambda x: x["loss"])
-            elites = valid_models[:args.keep]
-            trash = valid_models[args.keep:]
+            # === НОВАЯ ЛОГИКА: ГРУППИРОВКА ПО АРХИТЕКТУРАМ ===
+            models_by_arch = {}
+            for m in valid_models:
+                a = m["arch"]
+                if a not in models_by_arch:
+                    models_by_arch[a] = []
+                models_by_arch[a].append(m)
+
+            elites = []
+            trash = []
+
+            # Применяем квоту (--keep) к каждой архитектуре отдельно
+            for a, models in models_by_arch.items():
+                models.sort(key=lambda x: x["loss"])
+                elites.extend(models[:args.keep])
+                trash.extend(models[args.keep:])
 
             if trash:
                 for bad in trash:
@@ -119,8 +135,10 @@ def main():
 
             if elites:
                 print("   💎 Элита фолда (Топ по Loss):")
+                # Сортируем вывод чисто для красоты (сначала по архитектуре, потом по Loss)
+                elites.sort(key=lambda x: (x["arch"], x["loss"]))
                 for elite in elites:
-                    print(f"      Run: {elite['run']:<10} | Loss: {elite['loss']:.4f}")
+                    print(f"      [{elite['arch']}] Run: {elite['run']:<10} | Loss: {elite['loss']:.4f}")
                 grand_total_kept += len(elites)
 
     print("\n" + "="*80)
