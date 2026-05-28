@@ -4,7 +4,7 @@ import math
 import tensorflow as tf
 from tensorflow.keras.layers import (Input, Dense, Dropout, LayerNormalization, 
                                      Conv1D, GaussianNoise, GRU, GlobalMaxPooling1D, 
-                                     Add, Activation)
+                                     Add, Activation, Flatten)
 from tensorflow.keras.models import Model
 from tensorflow.keras import regularizers
 
@@ -32,16 +32,19 @@ def _create_conv1d_gru_model(seq_len, n_features, l2_reg):
 # ==========================================
 def residual_conv_block(x, filters, kernel_size, l2_reg):
     shortcut = x
-    x = Conv1D(filters, kernel_size, padding='same', kernel_regularizer=regularizers.l2(l2_reg))(x)
+    
+    # ИСЦЕЛЕНИЕ 1: padding='causal' для правильной работы со временем
+    x = Conv1D(filters, kernel_size, padding='causal', kernel_regularizer=regularizers.l2(l2_reg))(x)
     x = LayerNormalization()(x)
     x = Activation('gelu')(x)
     x = Dropout(0.1)(x)
     
-    x = Conv1D(filters, kernel_size, padding='same', kernel_regularizer=regularizers.l2(l2_reg))(x)
+    x = Conv1D(filters, kernel_size, padding='causal', kernel_regularizer=regularizers.l2(l2_reg))(x)
     x = LayerNormalization()(x)
     
-    if shortcut.shape[-1] != filters:
-        shortcut = Conv1D(filters, 1, padding='same')(shortcut)
+    # ИСЦЕЛЕНИЕ 2: Безопасное приведение типов и добавление регуляризатора
+    if int(shortcut.shape[-1]) != filters:
+        shortcut = Conv1D(filters, 1, padding='valid', kernel_regularizer=regularizers.l2(l2_reg))(shortcut)
         
     x = Add()([shortcut, x])
     x = Activation('gelu')(x)
@@ -52,9 +55,14 @@ def _create_cnn_model(seq_len, n_features, l2_reg):
     x = GaussianNoise(0.01)(inputs)
     x = LayerNormalization()(x)
 
-    x = Conv1D(32, 1, activation='gelu')(x)
+    # ИСЦЕЛЕНИЕ 3: Добавлен kernel_regularizer, чтобы веса не взрывались
+    x = Conv1D(32, 1, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(x)
+    
     x = residual_conv_block(x, filters=32, kernel_size=3, l2_reg=l2_reg)
-    x = GlobalMaxPooling1D()(x)
+    
+    # ИСЦЕЛЕНИЕ 4: Заменили MaxPooling на Flatten! 
+    # Сохраняем строгий порядок: День 1 -> День 2 -> ... -> День 6.
+    x = Flatten()(x)
     x = Dropout(0.15)(x)
 
     x = Dense(64, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(x)
