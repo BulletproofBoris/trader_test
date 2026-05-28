@@ -18,20 +18,18 @@ def create_model(seq_len, n_features, l2_reg):
     # 1. Bottleneck: "Умный фильтр"
     # Мгновенно собирает 68 сырых признаков в 16 плотных мета-факторов на каждом баре.
     x = Conv1D(
-        filters=32, 
+        filters=16, 
         kernel_size=1, 
         activation='gelu', 
         kernel_regularizer=regularizers.l2(l2_reg),
         name="feature_bottleneck"
     )(x)
 
-    x = SpatialDropout1D(0.05)(x)
-
     # 2. GRU: Снайперский выстрел
     # return_sequences=False заставляет GRU "молчать" первые 5 дней 
     # и выдать всю накопленную уверенность строго на 6-м (последнем) баре.
     x = GRU(
-        units=32, 
+        units=32,
         return_sequences=False, 
         kernel_regularizer=regularizers.l2(l2_reg),
         name="gru_temporal"
@@ -39,7 +37,7 @@ def create_model(seq_len, n_features, l2_reg):
     x = Dropout(0.1)(x)
 
     # 3. Финальный классификатор
-    x = Dense(32, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(x)
+    x = Dense(64, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(x)
     x = Dropout(0.1)(x)
     
     outputs = Dense(3, activation='softmax', name='out')(x)
