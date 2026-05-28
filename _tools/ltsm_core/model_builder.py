@@ -2,9 +2,9 @@ import json
 from pathlib import Path
 import math
 import tensorflow as tf
-from tensorflow.keras.layers import (Input, Dense, Dropout, LayerNormalization, 
-                                     Conv1D, GaussianNoise, GRU, GlobalMaxPooling1D, 
-                                     Add, Activation, Flatten)
+from tensorflow.keras.layers import (Input, Dense, Dropout, LayerNormalization, Reshape, Concatenate,
+                                     Conv1D, GaussianNoise, GRU, GlobalMaxPooling1D, Multiply,
+                                     Add, Activation, Flatten, GlobalAveragePooling1D, SpatialDropout1D)
 from tensorflow.keras.models import Model
 from tensorflow.keras import regularizers
 
@@ -30,21 +30,50 @@ def _create_conv1d_gru_model(seq_len, n_features, l2_reg):
 # ==========================================
 # 2. АРХИТЕКТУРА БЕЗ РЕКУРСИИ (cnn)
 # ==========================================
-def residual_conv_block(x, filters, kernel_size, l2_reg):
+def squeeze_and_excitation_block(x, ratio=4):
+    """SE-блок: Динамическое внимание к каналам (признакам)"""
+    filters = x.shape[-1]
+    
+    # Squeeze: сжимаем время (6 дней -> 1 число на каждый фильтр)
+    se = GlobalAveragePooling1D()(x)
+    
+    # Excite: вычисляем веса важности для каждого фильтра
+    se = Dense(filters // ratio, activation='relu', kernel_initializer='he_normal')(se)
+    se = Dense(filters, activation='sigmoid', kernel_initializer='he_normal')(se)
+    
+    # Умножаем веса на исходный тензор
+    se = Reshape((1, filters))(se)
+    return Multiply()([x, se])
+
+def inception_residual_block(x, l2_reg):
+    """Inception + Residual: Ищет паттерны разной длины (1, 2, 3, 5 дней)"""
     shortcut = x
     
-    # ИСЦЕЛЕНИЕ 1: padding='causal' для правильной работы со временем
-    x = Conv1D(filters, kernel_size, padding='causal', kernel_regularizer=regularizers.l2(l2_reg))(x)
-    x = LayerNormalization()(x)
-    x = Activation('gelu')(x)
-    x = Dropout(0.1)(x)
+    # Ветка 1: Точечные паттерны (1 день - प्राइस экшен)
+    branch1 = Conv1D(16, kernel_size=1, padding='causal', activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(x)
     
-    x = Conv1D(filters, kernel_size, padding='causal', kernel_regularizer=regularizers.l2(l2_reg))(x)
+    # Ветка 2: Микро-паттерны (2 дня - поглощения)
+    branch2 = Conv1D(16, kernel_size=2, padding='causal', activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(x)
+    
+    # Ветка 3: Стандартные паттерны (3 дня)
+    branch3 = Conv1D(16, kernel_size=3, padding='causal', activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(x)
+
+    # Ветка 4: Макро-паттерны (5 дней - тренд недели)
+    branch5 = Conv1D(16, kernel_size=5, padding='causal', activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(x)
+    
+    # Склеиваем все 4 ветки (получаем 16*4 = 64 фильтра)
+    x = Concatenate(axis=-1)([branch1, branch2, branch3, branch5])
     x = LayerNormalization()(x)
     
-    # ИСЦЕЛЕНИЕ 2: Безопасное приведение типов и добавление регуляризатора
-    if int(shortcut.shape[-1]) != filters:
-        shortcut = Conv1D(filters, 1, padding='valid', kernel_regularizer=regularizers.l2(l2_reg))(shortcut)
+    # Внимание! Сеть сама решает, какая ветка (2, 3 или 5 дней) сейчас важнее
+    x = squeeze_and_excitation_block(x)
+    
+    # Сжимаем обратно в 32 фильтра для экономии параметров
+    x = Conv1D(32, kernel_size=1, padding='causal', kernel_regularizer=regularizers.l2(l2_reg))(x)
+    
+    # Residual Connection (добавляем шорткат)
+    if int(shortcut.shape[-1]) != 32:
+        shortcut = Conv1D(32, 1, padding='valid', kernel_regularizer=regularizers.l2(l2_reg))(shortcut)
         
     x = Add()([shortcut, x])
     x = Activation('gelu')(x)
@@ -55,18 +84,22 @@ def _create_cnn_model(seq_len, n_features, l2_reg):
     x = GaussianNoise(0.01)(inputs)
     x = LayerNormalization()(x)
 
-    # ИСЦЕЛЕНИЕ 3: Добавлен kernel_regularizer, чтобы веса не взрывались
+    # 1. Bottleneck (Проекция признаков)
     x = Conv1D(32, 1, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(x)
     
-    x = residual_conv_block(x, filters=32, kernel_size=3, l2_reg=l2_reg)
+    # НОВОЕ: Пространственный дропаут (выключает целые индикаторы на все 6 дней)
+    x = SpatialDropout1D(0.15)(x)
     
-    # ИСЦЕЛЕНИЕ 4: Заменили MaxPooling на Flatten! 
-    # Сохраняем строгий порядок: День 1 -> День 2 -> ... -> День 6.
+    # 2. Inception-Residual Блок
+    x = inception_residual_block(x, l2_reg)
+    
+    # 3. Подготовка для Dense слоя
     x = Flatten()(x)
-    x = Dropout(0.15)(x)
+    x = Dropout(0.2)(x) # Чуть усилил финальный дропаут
 
+    # 4. Классификатор
     x = Dense(64, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(x)
-    x = Dropout(0.15)(x)
+    x = Dropout(0.2)(x)
     
     outputs = Dense(3, activation='softmax', name='out')(x)
     return Model(inputs=inputs, outputs=outputs)
