@@ -2,25 +2,34 @@ import json
 from pathlib import Path
 import math
 import tensorflow as tf
-from tensorflow.keras.layers import Input, Dense, Dropout, LayerNormalization, Conv1D, GaussianNoise, GRU, Multiply, GlobalAveragePooling1D, Reshape
+from tensorflow.keras.layers import (Input, Dense, Dropout, LayerNormalization, Conv1D,
+    MultiHeadAttention, Add, GaussianNoise, GRU, Multiply, GlobalAveragePooling1D, Reshape, SpatialDropout1D
+)
 from tensorflow.keras.models import Model
 from tensorflow.keras import regularizers
 
 def create_model(seq_len, n_features, l2_reg):
     inputs = Input(shape=(seq_len, n_features), name="input_layer")
+    
+    # Легкий шум не дает сети выучить наизусть конкретные значения цен
     x = GaussianNoise(0.01)(inputs)
     x = LayerNormalization()(x)
 
-    # 1. Bottleneck: Сжимаем 68 признаков в 16 самых важных
+    # 1. Bottleneck: "Умный фильтр"
+    # Мгновенно собирает 68 сырых признаков в 16 плотных мета-факторов на каждом баре.
     x = Conv1D(
-        filters=16, 
+        filters=32, 
         kernel_size=1, 
         activation='gelu', 
         kernel_regularizer=regularizers.l2(l2_reg),
         name="feature_bottleneck"
     )(x)
 
-    # 2. GRU: Временной анализ чистых данных
+    x = SpatialDropout1D(0.05)(x)
+
+    # 2. GRU: Снайперский выстрел
+    # return_sequences=False заставляет GRU "молчать" первые 5 дней 
+    # и выдать всю накопленную уверенность строго на 6-м (последнем) баре.
     x = GRU(
         units=32, 
         return_sequences=False, 
