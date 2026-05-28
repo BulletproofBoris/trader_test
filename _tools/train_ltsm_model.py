@@ -183,7 +183,7 @@ def main(args):
 
             # 🌟 ДИНАМИЧЕСКИЙ ПОРОГ ДЛЯ ТОП-3
             swarm_id = os.environ.get("SWARM_ID", "manual")
-            saving_threshold = orchestrator.get_saving_threshold(args.fold, keep=3)
+            saving_threshold = orchestrator.get_saving_threshold(args.fold, keep=10)
             
             if saving_threshold == float('inf'):
                 target_str = "Заполнение Топ-3 пула"
@@ -286,7 +286,7 @@ def main(args):
             status = 'PRUNED' if profiler.pruned else 'COMPLETED'
             
             # 1. СНАЧАЛА узнаем проходной балл (пока база не обновилась!)
-            final_threshold = orchestrator.get_saving_threshold(args.fold, keep=3)
+            final_threshold = orchestrator.get_saving_threshold(args.fold, keep=10)
             
             # 2. ЗАТЕМ записываем наш новый результат в базу
             orchestrator.register_run_end(
@@ -402,5 +402,6 @@ if __name__ == "__main__":
                         help="Радиус (величина окрестности) разброса вокруг указанных координат PCA")
     parser.add_argument("--track_trajectory", action="store_true",
                         help="Включить запись траектории весов (landscape_*.h5) для анализа ландшафта потерь")
+    parser.add_argument("--arch", type=str, default="6a", help="Название архитектуры (6a, cnn, mlp)")
     args = parser.parse_args()
     main(args)
