@@ -73,7 +73,6 @@ def create_model(arch, seq_len, n_features, l2_reg):
         return _create_cnn_model(seq_len, n_features, l2_reg)
     else:
         raise ValueError(f"❌ Неизвестная архитектура: {arch}")
-    return Model(inputs=inputs, outputs=outputs)
 
 def save_record_model(model, history, acc, loss, train_time, run_id, dataset_name, fold, seq_len, n_features, models_dir, arch):
     # 1. Формируем имя файла с префиксом архитектуры

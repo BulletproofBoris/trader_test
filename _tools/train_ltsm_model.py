@@ -402,7 +402,6 @@ if __name__ == "__main__":
                         help="Радиус (величина окрестности) разброса вокруг указанных координат PCA")
     parser.add_argument("--track_trajectory", action="store_true",
                         help="Включить запись траектории весов (landscape_*.h5) для анализа ландшафта потерь")
-    parser.add_argument("--arch", type=str, default="6a", help="Название архитектуры (6a, cnn, mlp)")
     parser.add_argument("--arch", type=str, default="conv1d+gru", help="Архитектура модели (conv1d+gru, cnn)")
     args = parser.parse_args()
     main(args)
