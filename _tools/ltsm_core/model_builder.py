@@ -56,17 +56,17 @@ def _create_cnn_model(seq_len, n_features, l2_reg):
     x = LayerNormalization()(x)
 
     # 1. Bottleneck (Проекция признаков + Регуляризация)
-    x = Conv1D(32, 1, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(x)
+    x = Conv1D(16, 1, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(x)
     
     # 2. Простая остаточная свертка
-    x = residual_conv_block(x, filters=32, kernel_size=3, l2_reg=l2_reg)
+    x = residual_conv_block(x, filters=16, kernel_size=4, l2_reg=l2_reg)
     
     # 3. Вытягиваем в вектор (Без потери времени!)
     x = Flatten()(x)
     x = Dropout(0.15)(x)
 
     # 4. Классификатор
-    x = Dense(64, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(x)
+    x = Dense(32, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(x)
     x = Dropout(0.15)(x)
     
     outputs = Dense(3, activation='softmax', name='out')(x)
