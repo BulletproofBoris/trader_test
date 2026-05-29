@@ -16,12 +16,14 @@ def exp_func(x, a, b, c):
 def main():
     parser = argparse.ArgumentParser(description="Анализатор макро-тренда с A/B подсветкой последнего Swarm-запуска.")
     parser.add_argument("fold_dir", type=str, help="Путь к папке фолда")
+    parser.add_argument("--arch", type=str, default="conv1d+gru", help="Какую архитектуру анализировать") 
     parser.add_argument("--runs", type=int, default=100, help="Выделенный бюджет пула")
     parser.add_argument("--max_x", type=int, default=None, help="Ограничение по оси X")
     parser.add_argument("--valid_min", type=float, default=0.0, help="Нижняя граница")
     parser.add_argument("--valid_max", type=float, default=None, help="Верхняя граница")
     
     args = parser.parse_args()
+    
     db_path = os.path.join(args.fold_dir, f"trading_factory_{args.arch}.db")
     total_budget = args.runs
 

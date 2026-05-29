@@ -96,7 +96,7 @@ def main(args):
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     
     if args.append and MODELS_DIR.exists():
-        orchestrator.sync_with_filesystem(MODELS_DIR, args.fold, Path(args.dataset_dir).name)
+        orchestrator.sync_with_filesystem(MODELS_DIR, args.fold, Path(args.dataset_dir).name, current_arch=args.arch)
     
     with open(DATASET_DIR / "metadata.json", 'r', encoding='utf-8') as f:
         seq_len = json.load(f)["parameters"]["lookback"]

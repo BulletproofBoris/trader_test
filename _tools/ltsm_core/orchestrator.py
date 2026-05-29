@@ -82,7 +82,7 @@ class SmartOrchestrator:
     def remove_worker(self, worker_id):
         self._execute("DELETE FROM workers WHERE worker_id=?", (worker_id,))
 
-    def sync_with_filesystem(self, models_dir, fold_name, dataset_name):
+    def sync_with_filesystem(self, models_dir, fold_name, dataset_name, current_arch=None):
         total_files, added_count = 0, 0
         best_synced_loss = float('inf')
 
@@ -97,14 +97,24 @@ class SmartOrchestrator:
                 acc = data.get("metrics", {}).get("val_acc", 0) / 100.0 
                 ttc = data.get("training_stats", {}).get("training_time_seconds", 0.0)
 
+                # Достаем архитектуру из файла
+                file_arch = data.get("arch", meta_file.name.split('_')[0])
+
+                # 🛡️ ГЛАВНЫЙ ФИКС: Игнорируем модели чужих архитектур!
+                if current_arch and file_arch != current_arch:
+                    continue
+
                 if not run_id or loss is None: continue
 
                 if not self._execute("SELECT 1 FROM runs WHERE run_id=?", (run_id,), fetch=True):
+                    # Эмулируем правильные гиперпараметры, чтобы база их распознавала
+                    hyperparams_str = json.dumps({"arch": file_arch})
+                    
                     self._execute(
                         """INSERT INTO runs 
                            (run_id, config, fold, hyperparams, val_loss, val_acc, avg_epoch_time, overhead_time, total_ttc, status, session_id) 
                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'COMPLETED', 'legacy')""",
-                        (run_id, dataset_name, fold_name, "{}", loss, acc, 0.0, 0.0, ttc)
+                        (run_id, dataset_name, fold_name, hyperparams_str, loss, acc, 0.0, 0.0, ttc)
                     )
                     added_count += 1
                     best_synced_loss = min(best_synced_loss, loss)
@@ -112,7 +122,7 @@ class SmartOrchestrator:
                 print(f"⚠️ Ошибка чтения {meta_file.name}: {e}")
 
         if total_files > 0 and added_count > 0:
-            print(f"🔄 [Синхронизация] Добавлено {added_count} записей.")
+            print(f"🔄 [Синхронизация] Восстановлено {added_count} записей архитектуры '{current_arch}'.")
             rows = self._execute("SELECT best_loss FROM folds_meta WHERE fold_name=?", (fold_name,), fetch=True)
             current_db_best = rows[0][0] if rows else float('inf')
 
