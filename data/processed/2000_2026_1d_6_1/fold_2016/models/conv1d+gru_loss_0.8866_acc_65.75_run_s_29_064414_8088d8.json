@@ -1,0 +1,16 @@
+{
+    "model_name": "conv1d+gru_loss_0.8866_acc_65.75_run_s_29_064414_8088d8.keras",
+    "arch": "conv1d+gru",
+    "run_id": "run_s_29_064414_8088d8",
+    "dataset": "2000_2026_1d_6_1",
+    "fold": "fold_2016",
+    "seq_len": 6,
+    "n_features": 72,
+    "metrics": {
+        "val_loss": 0.8865741491317749,
+        "val_acc": 65.7545268535614
+    },
+    "training_stats": {
+        "training_time_seconds": 138.1061818599701
+    }
+}

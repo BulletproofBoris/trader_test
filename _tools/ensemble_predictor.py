@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import itertools
 from pathlib import Path
-from sklearn.metrics import accuracy_score, classification_report, log_loss
+from sklearn.metrics import accuracy_score, classification_report
 
 # Отключаем спам TF
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -65,8 +65,14 @@ def main(args):
     df_val = pd.read_parquet(val_parquet)
     X_val, y_val, dates_val, tickers_val = create_sequences(df_val, feature_cols, lookback)
     
+    # === НОВОЕ: Готовим метки для честного сравнения с Loss из Keras (со сглаживанием) ===
+    # Превращаем метки [0, 1, 2] в One-Hot векторы
+    y_val_one_hot = tf.one_hot(y_val, depth=3)
+    # Создаем точно такую же функцию потерь, как при model.compile()
+    smoothed_loss_fn = tf.keras.losses.CategoricalCrossentropy(label_smoothing=0.1)
+
     # Защита от экспоненциального взрыва
-    max_k = min(args.max_k, 12) 
+    max_k = min(args.max_k, 15) 
     top_models_info = load_top_models(models_dir, top_n=max_k)
     actual_k = len(top_models_info)
     
@@ -78,7 +84,7 @@ def main(args):
     
     all_probs = []
     for i, info in enumerate(top_models_info, 1):
-        print(f"  ⏳ Модель {i} (Indiv. Loss: {info['loss']:.4f})...")
+        print(f"  ⏳ Модель {i} (Indiv. Smoothed Loss: {info['loss']:.4f})...")
         model = tf.keras.models.load_model(info['path'], compile=False)
         probs = model.predict(X_val, batch_size=2048, verbose=0)
         all_probs.append(probs)
@@ -94,9 +100,12 @@ def main(args):
             combo_probs = [all_probs[i] for i in combo]
             ensemble_probs = np.mean(combo_probs, axis=0)
             
+            # Argmax оставляем только для вывода отчета accuracy
             ensemble_preds = np.argmax(ensemble_probs, axis=1)
             acc = accuracy_score(y_val, ensemble_preds)
-            loss = log_loss(y_val, ensemble_probs)
+            
+            # === НОВОЕ: Считаем Loss так же, как при обучении ===
+            loss = smoothed_loss_fn(y_val_one_hot, ensemble_probs).numpy()
             
             # Названия моделей (от 1 до N)
             combo_names = "+".join([str(i+1) for i in combo])
@@ -109,11 +118,11 @@ def main(args):
                 "preds": ensemble_preds
             })
 
-    # Сортируем результаты по Log Loss
+    # Сортируем результаты строго по Сглаженному Loss
     results.sort(key=lambda x: x['log_loss'])
     
     print("\n" + "="*65)
-    print(f"{'Комбинация моделей':<25} | {'Кол-во (K)':<12} | {'Acc (%)':<10} | {'Log Loss':<10}")
+    print(f"{'Комбинация моделей':<25} | {'Кол-во (K)':<15} | {'Acc (%)':<10} | {'Smoothed Loss':<10}")
     print("-" * 65)
     
     # Выводим Топ-15 лучших комбинаций
@@ -123,15 +132,34 @@ def main(args):
     print("="*65)
     
     best_result = results[0]
-    print(f"\n✅ Оптимальный альянс: Модели [{best_result['combo']}]")
-    print("Детальный отчет для лучшей комбинации:")
+    print(f"\n✅ Оптимальный альянс: Модели [{best_result['combo']}] (Smoothed Loss: {best_result['log_loss']:.4f})")
+    
+    # Оставляем детальный отчет purely for debugging metrics
+    print("Детальный отчет (по argmax, чисто для справки):")
     print(classification_report(y_val, best_result['preds'], target_names=['SL (-1)', 'Hold (0)', 'TP (+1)']))
+
+    # === СОХРАНЕНИЕ АЛЬЯНСА ДЛЯ RL ===
+    best_combo_indices = [int(i)-1 for i in best_result['combo'].split('+')]
+    optimal_models_files = [top_models_info[i]['path'] for i in best_combo_indices]
+    
+    alliance_config = {
+        "fold": args.fold,
+        "optimal_k": best_result['k'],
+        "ensemble_smoothed_loss": float(best_result['log_loss']),
+        "models": optimal_models_files
+    }
+    
+    alliance_file = artifacts_dir / "optimal_alliance.json"
+    with open(alliance_file, 'w', encoding='utf-8') as f:
+        json.dump(alliance_config, f, indent=4, ensure_ascii=False)
+        
+    print(f"\n💾 Состав оптимального альянса сохранен в: {alliance_file.name}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Автоматический поиск лучших комбинаций ансамбля")
     parser.add_argument("--dataset_dir", type=str, default="data/processed/2000_2026_1d_6_1")
     parser.add_argument("--fold", type=str, default="fold_2010")
-    parser.add_argument("--max_k", type=int, default=10, help="Сколько топ-моделей взять для перебора (Макс 12)")
+    parser.add_argument("--max_k", type=int, default=10, help="Сколько топ-моделей взять для перебора (Макс 15)")
     args = parser.parse_args()
     
     main(args)
