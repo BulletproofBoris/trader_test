@@ -85,17 +85,17 @@ def _create_mlp_model(seq_len, n_features, l2_reg):
 
     # 1. Проекция в широкое пространство (Даем сети возможность дышать)
     # Обрати внимание: активации внутри Dense НЕТ! Мы делаем это вручную.
-    x = Dense(256, kernel_regularizer=regularizers.l2(l2_reg))(x)
+    x = Dense(512, kernel_regularizer=regularizers.l2(l2_reg))(x)
     x = LayerNormalization()(x)
     x = Activation('gelu')(x)
-    x = Dropout(0.2)(x)
+    x = Dropout(0.15)(x)
 
     # 2. Residual Блок (MLP-ResNet) - Главный секрет для табличных данных
     shortcut = x
-    x = Dense(256, kernel_regularizer=regularizers.l2(l2_reg))(x)
+    x = Dense(512, kernel_regularizer=regularizers.l2(l2_reg))(x)
     x = LayerNormalization()(x)
     x = Activation('gelu')(x)
-    x = Dropout(0.2)(x)
+    x = Dropout(0.15)(x)
     
     # Складываем вход и выход блока
     x = Add()([shortcut, x])
