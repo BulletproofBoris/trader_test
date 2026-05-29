@@ -88,23 +88,23 @@ def _create_mlp_model(seq_len, n_features, l2_reg):
     x = Dense(512, kernel_regularizer=regularizers.l2(l2_reg))(x)
     x = LayerNormalization()(x)
     x = Activation('gelu')(x)
-    x = Dropout(0.15)(x)
+    x = Dropout(0.1)(x)
 
     # 2. Residual Блок (MLP-ResNet) - Главный секрет для табличных данных
     shortcut = x
     x = Dense(512, kernel_regularizer=regularizers.l2(l2_reg))(x)
     x = LayerNormalization()(x)
     x = Activation('gelu')(x)
-    x = Dropout(0.15)(x)
+    x = Dropout(0.1)(x)
     
     # Складываем вход и выход блока
     x = Add()([shortcut, x])
 
     # 3. Мягкое сужение перед классификатором
-    x = Dense(64, kernel_regularizer=regularizers.l2(l2_reg))(x)
+    x = Dense(128, kernel_regularizer=regularizers.l2(l2_reg))(x)
     x = LayerNormalization()(x)
     x = Activation('gelu')(x)
-    x = Dropout(0.15)(x) # Снизили дропаут, чтобы не убить сигнал
+    x = Dropout(0.1)(x) # Снизили дропаут, чтобы не убить сигнал
     
     outputs = Dense(3, activation='softmax', name='out')(x)
     return Model(inputs=inputs, outputs=outputs)
