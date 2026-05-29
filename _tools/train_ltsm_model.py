@@ -83,7 +83,7 @@ def main(args):
     MODELS_DIR = FOLD_DIR / "models"
     ARTIFACTS_DIR = FOLD_DIR / "artifacts"
     
-    db_path = FOLD_DIR / "trading_factory.db"
+    db_path = FOLD_DIR / f"trading_factory_{args.arch}.db"
     orchestrator = SmartOrchestrator(db_path)
     
     if MODELS_DIR.exists() and any(MODELS_DIR.glob("*.keras")):

@@ -22,7 +22,7 @@ def main():
     parser.add_argument("--valid_max", type=float, default=None, help="Верхняя граница")
     
     args = parser.parse_args()
-    db_path = os.path.join(args.fold_dir, "trading_factory.db")
+    db_path = os.path.join(args.fold_dir, f"trading_factory_{args.arch}.db")
     total_budget = args.runs
 
     if not os.path.exists(db_path):
