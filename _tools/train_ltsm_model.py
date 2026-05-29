@@ -11,6 +11,12 @@ import json
 import ctypes
 import multiprocessing
 
+# === ЦВЕТА ДЛЯ ЛОГОВ ===
+C_GREEN = '\033[92m'
+C_YELLOW = '\033[93m'
+C_RED = '\033[91m'
+C_RESET = '\033[0m'
+
 # Жестко прописываем путь к корню инструментов
 current_dir = Path(__file__).resolve().parent
 if str(current_dir) not in sys.path:
@@ -190,7 +196,7 @@ def main(args):
             else:
                 target_str = f"Loss < {saving_threshold:.4f}"
 
-            print(f"\n{'-'*60}\n🔄 ИТЕРАЦИЯ {current_run}/{args.runs} (Цель: {target_str})")
+            print(f"\n{'-'*60}\n🔄 ИТЕРАЦИЯ {current_run}/{args.runs} | {C_GREEN}Текущий рекорд: {global_best_loss:.4f}{C_RESET} | (Цель: {target_str})")
             print(f"📈 Статус тренда: {reason}\n{'-'*60}")
             
             run_hash = hashlib.md5(f'{time.time()}_{np.random.randint(1000)}'.encode()).hexdigest()[:6]
@@ -302,13 +308,17 @@ def main(args):
                 if loss < final_threshold:
                     save_record_model(model, history, acc, loss, profiler.total_ttc, run_id, Path(args.dataset_dir).name, args.fold, seq_len, n_features, MODELS_DIR, args.arch)
                     if loss < global_best_loss:
-                        print(f"🏆 АБСОЛЮТНЫЙ РЕКОРД! Модель сохранена на 1-е место!")
+                        # ЗЕЛЕНЫЙ для абсолютного рекорда
+                        print(f"{C_GREEN}🏆 АБСОЛЮТНЫЙ РЕКОРД! Модель сохранена на 1-е место!{C_RESET}")
                     else:
-                        print(f"💎 МОДЕЛЬ ПРИНЯТА! Пробила порог Топ-3 лучших (Порог был: {final_threshold:.4f})")
+                        # ЖЕЛТЫЙ для попадания в Топ-10
+                        print(f"{C_YELLOW}💎 МОДЕЛЬ ПРИНЯТА! Пробила порог Топ-10 лучших (Порог был: {final_threshold:.4f}){C_RESET}")
+                else:
+                    print(f"🗑️ Модель не прошла в Топ (Loss {loss:.4f} >= {final_threshold:.4f}).")
 
             # ♻️ ПАТТЕРН "КАМИКАДЗЕ" (Считаем только локальные итерации этой жизни)
             if local_runs_this_session >= 10:
-                print(f"\n♻️ [КАМИКАДЗЕ] Плановый рестарт процесса для очистки RAM (Выполнено 10 итераций подряд).")
+                print(f"{C_YELLOW}\n♻️ [КАМИКАДЗЕ] Плановый рестарт процесса для очистки RAM (Выполнено 10 итераций подряд).")
                 sys.exit(3)
 
     finally:

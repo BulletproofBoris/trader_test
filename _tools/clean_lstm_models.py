@@ -19,11 +19,11 @@ def main():
 
     print(f"🧹 Запуск ГЛОБАЛЬНОЙ уборки...")
     print(f"   📂 Модели: {base_dir} (Оставляем Топ-{args.keep})")
-    print(f"   📜 Логи: {logs_dir}/worker_swarm_*_log.txt")
+    print(f"   📜 Логи: {logs_dir}/worker_swarm_*.log")
     
-    # 1. ОЧИСТКА ЛОГОВ (worker_swarm_*_log.txt)
+    # 1. ОЧИСТКА ЛОГОВ (worker_swarm_*.log)
     deleted_logs = 0
-    for log_file in logs_dir.glob("worker_swarm_*_log.txt"):
+    for log_file in logs_dir.glob("worker_swarm_*.log"):
         try:
             log_file.unlink()
             deleted_logs += 1

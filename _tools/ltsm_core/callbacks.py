@@ -5,6 +5,9 @@ import tensorflow as tf
 from tensorflow.keras.callbacks import Callback
 import os
 
+C_RED = '\033[91m'
+C_RESET = '\033[0m'
+
 class ElasticPatienceProfiler(Callback):
     def __init__(self, orchestrator, fold_name, max_epochs, bonus_ratio=0.1, min_delta=0.001,
                  hard_prune_epoch=30,     # Эпоха включения гильотины
@@ -90,7 +93,7 @@ class ElasticPatienceProfiler(Callback):
         guillotine_limit = self.mu + (self.hard_prune_z * self.sigma)
         
         if epoch >= self.hard_prune_epoch and self.local_best_loss > guillotine_limit:
-            self.pending_msgs.append(f"\n🔪 [Hard Pruning] Эпоха {epoch}: Лучший Loss {self.local_best_loss:.4f} > лимита {guillotine_limit:.4f} ({self.hard_prune_z} сигм от элиты). Итерация убита.")
+            self.pending_msgs.append(f"\n{C_RED}🔪 [Hard Pruning] Эпоха {epoch}: Лучший Loss {self.local_best_loss:.4f} > лимита {guillotine_limit:.4f} ({self.hard_prune_z} сигм от элиты). Итерация убита.{C_RESET}")
             self.model.stop_training = True
             self.pruned = True
             return
@@ -99,7 +102,7 @@ class ElasticPatienceProfiler(Callback):
             z_score = (self.local_best_loss - self.mu) / self.sigma
             
             if z_score > self.max_z_score:
-                self.pending_msgs.append(f"\n🔪 [Elite Z-Score] Нет улучшений {self.micro_patience} эпох. ЛУЧШИЙ Loss {self.local_best_loss:.4f} вылетел из элитного коридора (Z={z_score:.2f} > {self.max_z_score}). Итерация убита.")
+                self.pending_msgs.append(f"\n{C_RED}🔪 [Elite Z-Score] Нет улучшений {self.micro_patience} эпох. ЛУЧШИЙ Loss {self.local_best_loss:.4f} вылетел из элитного коридора (Z={z_score:.2f} > {self.max_z_score}). Итерация убита.{C_RESET}")
                 self.model.stop_training = True
                 self.pruned = True
                 return

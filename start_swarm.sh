@@ -60,7 +60,7 @@ do
         tmux new-session -d -s "$SESSION"
         
         # Запуск команды
-        tmux send-keys -t "$SESSION" "$CMD >> ${SESSION}_log.txt 2>&1" C-m
+        tmux send-keys -t "$SESSION" "$CMD >> ${SESSION}.log 2>&1" C-m
         
         if [ "$i" -lt "$MAX_WORKERS" ]; then
             echo "⏳ Жду $STAGGER_DELAY сек..."

@@ -84,13 +84,17 @@ def _create_mlp_model(seq_len, n_features, l2_reg):
     x = Flatten()(x)
 
     # 1. Широкий слой: ищем скрытые связи между всеми 408 признаками сразу
-    x = Dense(128, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(x)
+    x = Dense(64, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(x)
     x = LayerNormalization()(x)
-    x = Dropout(0.2)(x)
+    x = Dropout(0.1)(x)
+
+    x = Dense(16, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(x)
+    x = LayerNormalization()(x)
+    x = Dropout(0.1)(x)
 
     # 2. Сужение (Bottleneck) для фильтрации шума
-    x = Dense(32, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(x)
-    x = Dropout(0.15)(x)
+    x = Dense(8, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(x)
+    x = Dropout(0.1)(x)
     
     outputs = Dense(3, activation='softmax', name='out')(x)
     return Model(inputs=inputs, outputs=outputs)
