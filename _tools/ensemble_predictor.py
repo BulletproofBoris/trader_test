@@ -122,8 +122,10 @@ def main(args):
                 })
                 pbar.update(1) # Обновляем статус бар
 
-    # Сортируем результаты по Сглаженному Loss
-    results.sort(key=lambda x: x['log_loss'])
+    # === НОВОЕ: Двойная сортировка (Loss + Accuracy тай-брейкер) ===
+    # Округляем Loss до 4 знаков при сортировке. 
+    # Если Loss одинаковый (до 4-го знака), сортируем по убыванию Accuracy (-x['accuracy'])
+    results.sort(key=lambda x: (round(x['log_loss'], 4), -x['accuracy']))
     
     print("\n" + "="*70)
     print(f"{'Комбинация моделей':<30} | {'Кол-во (K)':<12} | {'Acc (%)':<10} | {'Smoothed Loss':<10}")
