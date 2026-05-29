@@ -1,0 +1,16 @@
+{
+    "model_name": "mlp_loss_0.9777_acc_56.38_run_s_29_161256_355037.keras",
+    "arch": "mlp",
+    "run_id": "run_s_29_161256_355037",
+    "dataset": "2000_2026_1d_6_1",
+    "fold": "fold_2022",
+    "seq_len": 6,
+    "n_features": 71,
+    "metrics": {
+        "val_loss": 0.9777125120162964,
+        "val_acc": 56.384432315826416
+    },
+    "training_stats": {
+        "training_time_seconds": 53.27399706840515
+    }
+}
