@@ -83,18 +83,28 @@ def _create_mlp_model(seq_len, n_features, l2_reg):
     # Мгновенно уничтожаем понятие времени: (6, 68) -> (408,)
     x = Flatten()(x)
 
-    # 1. Широкий слой: ищем скрытые связи между всеми 408 признаками сразу
-    x = Dense(64, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(x)
+    # 1. Проекция в широкое пространство (Даем сети возможность дышать)
+    # Обрати внимание: активации внутри Dense НЕТ! Мы делаем это вручную.
+    x = Dense(256, kernel_regularizer=regularizers.l2(l2_reg))(x)
     x = LayerNormalization()(x)
-    x = Dropout(0.1)(x)
+    x = Activation('gelu')(x)
+    x = Dropout(0.2)(x)
 
-    x = Dense(16, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(x)
+    # 2. Residual Блок (MLP-ResNet) - Главный секрет для табличных данных
+    shortcut = x
+    x = Dense(256, kernel_regularizer=regularizers.l2(l2_reg))(x)
     x = LayerNormalization()(x)
-    x = Dropout(0.1)(x)
+    x = Activation('gelu')(x)
+    x = Dropout(0.2)(x)
+    
+    # Складываем вход и выход блока
+    x = Add()([shortcut, x])
 
-    # 2. Сужение (Bottleneck) для фильтрации шума
-    x = Dense(8, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(x)
-    x = Dropout(0.1)(x)
+    # 3. Мягкое сужение перед классификатором
+    x = Dense(64, kernel_regularizer=regularizers.l2(l2_reg))(x)
+    x = LayerNormalization()(x)
+    x = Activation('gelu')(x)
+    x = Dropout(0.15)(x) # Снизили дропаут, чтобы не убить сигнал
     
     outputs = Dense(3, activation='softmax', name='out')(x)
     return Model(inputs=inputs, outputs=outputs)
