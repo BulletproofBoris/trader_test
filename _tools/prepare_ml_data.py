@@ -100,10 +100,34 @@ def main():
 
     # Оставляем только нужные колонки для нормализации
     print(f"✂️ Winsorization (0.1% - 99.9%) для {len(feature_cols)} признаков...")
-    for col in feature_cols:
-        lower = df_features[col].quantile(0.001)
-        upper = df_features[col].quantile(0.999)
-        df_features[col] = df_features[col].clip(lower=lower, upper=upper)
+    quantiles_file = Path(args.artifacts_dir) / "quantiles_winsor.json"
+
+    if args.phase == 'train':
+        quantiles_dict = {}
+        for col in feature_cols:
+            lower = float(df_features[col].quantile(0.001))
+            upper = float(df_features[col].quantile(0.999))
+            quantiles_dict[col] = {"lower": lower, "upper": upper}
+            df_features[col] = df_features[col].clip(lower=lower, upper=upper)
+        
+        # Сохраняем границы, выученные на Train
+        with open(quantiles_file, 'w', encoding='utf-8') as f:
+            json.dump(quantiles_dict, f, indent=4)
+            
+    elif args.phase == 'val':
+        if not quantiles_file.exists():
+            raise FileNotFoundError("quantiles_winsor.json не найден! Прогони Train.")
+            
+        with open(quantiles_file, 'r', encoding='utf-8') as f:
+            quantiles_dict = json.load(f)
+            
+        for col in feature_cols:
+            if col in quantiles_dict:
+                # 🛡️ ПРИМЕНЯЕМ: Обрезаем Val строго по границам Train!
+                df_features[col] = df_features[col].clip(
+                    lower=quantiles_dict[col]["lower"], 
+                    upper=quantiles_dict[col]["upper"]
+                )
 
     scaler_path = Path(args.artifacts_dir) / "scaler_features.pkl"
     scaler = StandardScaler()

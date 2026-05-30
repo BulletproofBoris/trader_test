@@ -115,7 +115,8 @@ def main():
         os.makedirs(ARTIFACTS_DIR, exist_ok=True)
         os.makedirs(FOLD_DIR / "models", exist_ok=True)
 
-        train_end = (current_split - pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+        # 🛡️ ЭМБАРГО: Отодвигаем конец трейна назад, чтобы таргеты не заглядывали в валидацию
+        train_end = (current_split - pd.Timedelta(days=args.horizon + 1)).strftime('%Y-%m-%d')
         val_start = current_split.strftime('%Y-%m-%d')
         val_end = (current_split + relativedelta(years=args.val_interval) - pd.Timedelta(days=1)).strftime('%Y-%m-%d')
 

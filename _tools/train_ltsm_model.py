@@ -35,7 +35,7 @@ import tensorflow as tf
 # 1. Включаем кэширование компиляции XLA на диск
 #os.environ['TF_XLA_FLAGS'] = "--tf_xla_persistent_cache_directory=./xla_cache"
 
-# 2. Жестко ограничиваем потоки для каждого воркеров!
+# 2. Жестко ограничиваем потоки для каждого воркера!
 num_cores = multiprocessing.cpu_count()
 workers_count = 16 # Твой MAX_WORKERS из bash-скрипта
 threads_per_worker = max(2, num_cores // workers_count)
@@ -68,7 +68,6 @@ if gpus:
 from ltsm_core.orchestrator import SmartOrchestrator
 from ltsm_core.data_loader import compute_class_weights_fast, load_tfrecord_dataset, count_tfrecord_samples
 from ltsm_core.model_builder import create_model, save_record_model
-# ИСПРАВЛЕНО: Добавлен импорт FullTrajectoryTracker из вашего файла callbacks
 from ltsm_core.callbacks import ElasticPatienceProfiler, SmartBacktrackCallback, FullTrajectoryTracker
 from ltsm_core.math_utils import find_max_physical_batch, get_adaptive_batch_config
 
@@ -201,7 +200,20 @@ def main(args):
             
             run_hash = hashlib.md5(f'{time.time()}_{np.random.randint(1000)}'.encode()).hexdigest()[:6]
             run_id = f"run_{swarm_id}_{run_hash}"
-            hyperparams = {"arch": args.arch, "lr": args.lr, "logical_batch": logical_batch, "phys_batch": phys_batch, "l2": args.l2_reg}
+            
+            # 🛑 НОВОЕ: Полный словарь гиперпараметров
+            hyperparams = {
+                "arch": args.arch, 
+                "lr": args.lr, 
+                "l2_reg": args.l2_reg,
+                "logical_batch": logical_batch, 
+                "phys_batch": phys_batch, 
+                "epochs": args.epochs,
+                "factor": args.factor,
+                "patience": args.patience,
+                "bonus_ratio": args.bonus_ratio,
+                "min_delta": args.min_delta
+            }
             orchestrator.register_run_start(run_id, Path(args.dataset_dir).name, args.fold, hyperparams)
             
             tf.keras.backend.clear_session()
@@ -306,7 +318,8 @@ def main(args):
                 print(f"\n🎯 Итог итерации {current_run}: Val Loss = {loss:.4f} | Val Acc = {acc*100:.2f}%")
                 
                 if loss < final_threshold:
-                    save_record_model(model, history, acc, loss, profiler.total_ttc, run_id, Path(args.dataset_dir).name, args.fold, seq_len, n_features, MODELS_DIR, args.arch)
+                    # 🛑 ПЕРЕДАЕМ hyperparams для сохранения в JSON
+                    save_record_model(model, history, acc, loss, profiler.total_ttc, run_id, Path(args.dataset_dir).name, args.fold, seq_len, n_features, MODELS_DIR, args.arch, hyperparams)
                     if loss < global_best_loss:
                         # ЗЕЛЕНЫЙ для абсолютного рекорда
                         print(f"{C_GREEN}🏆 АБСОЛЮТНЫЙ РЕКОРД! Модель сохранена на 1-е место!{C_RESET}")
@@ -412,6 +425,6 @@ if __name__ == "__main__":
                         help="Радиус (величина окрестности) разброса вокруг указанных координат PCA")
     parser.add_argument("--track_trajectory", action="store_true",
                         help="Включить запись траектории весов (landscape_*.h5) для анализа ландшафта потерь")
-    parser.add_argument("--arch", type=str, default="conv1d+gru", help="Архитектура модели (conv1d+gru, cnn)")
+    parser.add_argument("--arch", type=str, default="conv1d+gru", help="Архитектура модели (conv1d+gru, cnn, mlp, attention)")
     args = parser.parse_args()
     main(args)

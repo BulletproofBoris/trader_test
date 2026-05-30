@@ -4,12 +4,14 @@ import math
 import tensorflow as tf
 from tensorflow.keras.layers import (Input, Dense, Dropout, LayerNormalization, 
                                      Conv1D, GaussianNoise, GRU, Multiply,
-                                     Add, Activation, Flatten, GlobalAveragePooling1D, MultiHeadAttention)
+                                     Add, Activation, Flatten, 
+                                     GlobalAveragePooling1D, MultiHeadAttention,
+                                     SpatialDropout1D)
 from tensorflow.keras.models import Model
 from tensorflow.keras import regularizers
 
 # ==========================================
-# 1. АРХИТЕКТУРА С РЕКУРСИЕЙ (conv1d+gru) - Твой чемпион
+# 1. АРХИТЕКТУРА С РЕКУРСИЕЙ (conv1d+gru) - Якорь ансамбля
 # ==========================================
 def _create_conv1d_gru_model(seq_len, n_features, l2_reg):
     inputs = Input(shape=(seq_len, n_features), name="input_layer")
@@ -28,7 +30,7 @@ def _create_conv1d_gru_model(seq_len, n_features, l2_reg):
     return Model(inputs=inputs, outputs=outputs)
 
 # ==========================================
-# 2. АРХИТЕКТУРА БЕЗ РЕКУРСИИ (cnn) - Минималистичная V1
+# 2. АРХИТЕКТУРА БЕЗ РЕКУРСИИ (cnn) - Поиск пространственных паттернов
 # ==========================================
 def residual_conv_block(x, filters, kernel_size, l2_reg):
     shortcut = x
@@ -73,43 +75,39 @@ def _create_cnn_model(seq_len, n_features, l2_reg):
     return Model(inputs=inputs, outputs=outputs)
 
 # ==========================================
-# 3. АРХИТЕКТУРА ТАБЛИЧНАЯ (mlp) - Глобальный взгляд
+# 3. АРХИТЕКТУРА ТАБЛИЧНАЯ (mlp) - Information Bottleneck
 # ==========================================
 def _create_mlp_model(seq_len, n_features, l2_reg):
     inputs = Input(shape=(seq_len, n_features), name="input_layer")
     x = GaussianNoise(0.01)(inputs)
     x = LayerNormalization()(x)
 
+    # SpatialDropout ВЫКЛЮЧАЕТ случайные 20% индикаторов целиком (защита от дрейфа концепций)
+    x = SpatialDropout1D(0.2)(x)
+
     # Мгновенно уничтожаем понятие времени: (6, 68) -> (408,)
     x = Flatten()(x)
 
-    # 1. Проекция в широкое пространство (Даем сети возможность дышать)
-    # Обрати внимание: активации внутри Dense НЕТ! Мы делаем это вручную.
-    x = Dense(512, kernel_regularizer=regularizers.l2(l2_reg))(x)
+    # 1. БОТТЛНЕК (Удушение шума)
+    x = Dense(128, kernel_regularizer=regularizers.l2(l2_reg * 5))(x)
     x = LayerNormalization()(x)
     x = Activation('gelu')(x)
-    x = Dropout(0.1)(x)
+    x = Dropout(0.2)(x)
 
-    # 2. Residual Блок (MLP-ResNet) - Главный секрет для табличных данных
+    # 2. RESIDUAL БЛОК (Квадратная логика 128 -> 128)
     shortcut = x
-    d1 = Dense(512, kernel_regularizer=regularizers.l2(l2_reg))(x)
-    d1 = LayerNormalization()(d1)
-    d1 = Activation('gelu')(d1)
-    d1 = Dropout(0.1)(d1)
-
-    d2 = Dense(512, kernel_regularizer=regularizers.l2(l2_reg))(d1)
-    d2 = LayerNormalization()(d2)
-    d2 = Activation('gelu')(d2)
-    d2 = Dropout(0.1)(d2)
-
-    # Складываем вход и выход блока
-    x = Add()([shortcut, d1, d2])
-
-    # 3. Мягкое сужение перед классификатором
-    x = Dense(128, kernel_regularizer=regularizers.l2(l2_reg))(x)
+    x = Dense(128, kernel_regularizer=regularizers.l2(l2_reg * 5))(x)
     x = LayerNormalization()(x)
     x = Activation('gelu')(x)
-    x = Dropout(0.1)(x) # Снизили дропаут, чтобы не убить сигнал
+    x = Dropout(0.3)(x) 
+    
+    x = Add()([shortcut, x])
+
+    # 3. Мягкое сужение перед выходом
+    x = Dense(64, kernel_regularizer=regularizers.l2(l2_reg * 2))(x)
+    x = LayerNormalization()(x)
+    x = Activation('gelu')(x)
+    x = Dropout(0.2)(x) 
     
     outputs = Dense(3, activation='softmax', name='out')(x)
     return Model(inputs=inputs, outputs=outputs)
@@ -123,12 +121,10 @@ def _create_attention_model(seq_len, n_features, l2_reg):
     x = LayerNormalization()(x)
 
     # 1. Линейная проекция признаков (Embedding)
-    # Переводим 68 сырых фичей в 64 плотных вектора для каждого дня
     x = Dense(64, kernel_regularizer=regularizers.l2(l2_reg))(x)
     x = Activation('gelu')(x)
 
     # 2. Механизм Self-Attention (Позволяем дням "общаться" друг с другом)
-    # Смотрит на все дни сразу и ищет паттерны (например, расхождения между днем 1 и 6)
     attn_out = MultiHeadAttention(num_heads=4, key_dim=16, dropout=0.2)(x, x)
     
     # Остаточная связь (Residual)
@@ -136,7 +132,6 @@ def _create_attention_model(seq_len, n_features, l2_reg):
     x = LayerNormalization()(x)
 
     # 3. Агрегация времени (Вместо сплющивающего Flatten)
-    # Берем осмысленное среднее по всем дням с учетом их "весов внимания"
     x = GlobalAveragePooling1D()(x)
 
     # 4. Финальный классификатор
@@ -163,7 +158,7 @@ def create_model(arch, seq_len, n_features, l2_reg):
     else:
         raise ValueError(f"❌ Неизвестная архитектура: {arch}")
 
-def save_record_model(model, history, acc, loss, train_time, run_id, dataset_name, fold, seq_len, n_features, models_dir, arch):
+def save_record_model(model, history, acc, loss, train_time, run_id, dataset_name, fold, seq_len, n_features, models_dir, arch, hyperparams=None):
     # 1. Формируем имя файла с префиксом архитектуры
     model_filename = f"{arch}_loss_{loss:.4f}_acc_{acc*100:.2f}_{run_id}.keras"
     meta_filename = f"{arch}_loss_{loss:.4f}_acc_{acc*100:.2f}_{run_id}.json"
@@ -177,7 +172,9 @@ def save_record_model(model, history, acc, loss, train_time, run_id, dataset_nam
     # 3. Сохраняем метаданные
     meta_data = {
         "model_name": model_filename,
-        "arch": arch,  # <-- Сохраняем архитектуру в мете
+        "arch": arch,
+        "architecture_snapshot": json.loads(model.to_json()), # Слепок архитектуры
+        "hyperparams": hyperparams or {},                     # Сохраненные гиперпараметры
         "run_id": run_id,
         "dataset": dataset_name,
         "fold": fold,
