@@ -1,0 +1,16 @@
+{
+    "model_name": "attention_loss_1.0069_acc_55.43_run_s_30_085610_0b7093.keras",
+    "arch": "attention",
+    "run_id": "run_s_30_085610_0b7093",
+    "dataset": "2000_2026_1d_6_1",
+    "fold": "fold_2024",
+    "seq_len": 6,
+    "n_features": 70,
+    "metrics": {
+        "val_loss": 1.0069284439086914,
+        "val_acc": 55.42858839035034
+    },
+    "training_stats": {
+        "training_time_seconds": 60.05939054489136
+    }
+}
