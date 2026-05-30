@@ -4,7 +4,7 @@ import math
 import tensorflow as tf
 from tensorflow.keras.layers import (Input, Dense, Dropout, LayerNormalization, 
                                      Conv1D, GaussianNoise, GRU, Multiply,
-                                     Add, Activation, Flatten)
+                                     Add, Activation, Flatten, GlobalAveragePooling1D, MultiHeadAttention)
 from tensorflow.keras.models import Model
 from tensorflow.keras import regularizers
 
@@ -92,19 +92,58 @@ def _create_mlp_model(seq_len, n_features, l2_reg):
 
     # 2. Residual Блок (MLP-ResNet) - Главный секрет для табличных данных
     shortcut = x
-    x = Dense(512, kernel_regularizer=regularizers.l2(l2_reg))(x)
-    x = LayerNormalization()(x)
-    x = Activation('gelu')(x)
-    x = Dropout(0.1)(x)
-    
+    d1 = Dense(512, kernel_regularizer=regularizers.l2(l2_reg))(x)
+    d1 = LayerNormalization()(d1)
+    d1 = Activation('gelu')(d1)
+    d1 = Dropout(0.1)(d1)
+
+    d2 = Dense(512, kernel_regularizer=regularizers.l2(l2_reg))(d1)
+    d2 = LayerNormalization()(d2)
+    d2 = Activation('gelu')(d2)
+    d2 = Dropout(0.1)(d2)
+
     # Складываем вход и выход блока
-    x = Add()([shortcut, x])
+    x = Add()([shortcut, d1, d2])
 
     # 3. Мягкое сужение перед классификатором
     x = Dense(128, kernel_regularizer=regularizers.l2(l2_reg))(x)
     x = LayerNormalization()(x)
     x = Activation('gelu')(x)
     x = Dropout(0.1)(x) # Снизили дропаут, чтобы не убить сигнал
+    
+    outputs = Dense(3, activation='softmax', name='out')(x)
+    return Model(inputs=inputs, outputs=outputs)
+
+# ==========================================
+# 4. АРХИТЕКТУРА ВНИМАНИЯ (attention) - Умный глобальный взгляд
+# ==========================================
+def _create_attention_model(seq_len, n_features, l2_reg):
+    inputs = Input(shape=(seq_len, n_features), name="input_layer")
+    x = GaussianNoise(0.01)(inputs)
+    x = LayerNormalization()(x)
+
+    # 1. Линейная проекция признаков (Embedding)
+    # Переводим 68 сырых фичей в 64 плотных вектора для каждого дня
+    x = Dense(64, kernel_regularizer=regularizers.l2(l2_reg))(x)
+    x = Activation('gelu')(x)
+
+    # 2. Механизм Self-Attention (Позволяем дням "общаться" друг с другом)
+    # Смотрит на все дни сразу и ищет паттерны (например, расхождения между днем 1 и 6)
+    attn_out = MultiHeadAttention(num_heads=4, key_dim=16, dropout=0.2)(x, x)
+    
+    # Остаточная связь (Residual)
+    x = Add()([x, attn_out])
+    x = LayerNormalization()(x)
+
+    # 3. Агрегация времени (Вместо сплющивающего Flatten)
+    # Берем осмысленное среднее по всем дням с учетом их "весов внимания"
+    x = GlobalAveragePooling1D()(x)
+
+    # 4. Финальный классификатор
+    x = Dense(32, kernel_regularizer=regularizers.l2(l2_reg))(x)
+    x = LayerNormalization()(x)
+    x = Activation('gelu')(x)
+    x = Dropout(0.2)(x)
     
     outputs = Dense(3, activation='softmax', name='out')(x)
     return Model(inputs=inputs, outputs=outputs)
@@ -119,6 +158,8 @@ def create_model(arch, seq_len, n_features, l2_reg):
         return _create_cnn_model(seq_len, n_features, l2_reg)
     elif arch == "mlp":
         return _create_mlp_model(seq_len, n_features, l2_reg)
+    elif arch == "attention":
+        return _create_attention_model(seq_len, n_features, l2_reg)
     else:
         raise ValueError(f"❌ Неизвестная архитектура: {arch}")
 
