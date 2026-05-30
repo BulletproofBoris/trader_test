@@ -105,7 +105,7 @@ def main(args):
     # Формула сглаживания Keras: y_smooth = y_one_hot * (1 - alpha) + alpha / num_classes
     y_val_smoothed = y_val_one_hot * (1.0 - alpha) + (alpha / num_classes)
 
-    max_k = min(args.max_k, 20) # Лимит поднят до 20, так как скрипт теперь молниеносный
+    max_k = min(args.max_k, 30)
     top_models_info = load_top_models(models_dir, top_n=max_k)
     actual_k = len(top_models_info)
     
@@ -161,7 +161,7 @@ def main(args):
     print(f"{'Комбинация моделей':<30} | {'Кол-во (K)':<12} | {'Acc (%)':<10} | {'Smoothed Loss':<10}")
     print("-" * 70)
     
-    for res in results[:15]:
+    for res in results[:30]:
         marker = "⭐ БЕСТСЕЛЛЕР" if res == results[0] else ""
         print(f"[{res['combo']:<28}] | K={res['k']:<10} | {res['accuracy']*100:<10.2f} | {res['log_loss']:<10.4f} {marker}")
     print("="*70)
@@ -203,7 +203,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Многопоточный Анализатор лучших комбинаций ансамбля")
     parser.add_argument("--dataset_dir", type=str, default="data/processed/2000_2026_1d_6_1")
     parser.add_argument("--fold", type=str, default="fold_2010")
-    parser.add_argument("--max_k", type=int, default=16, help="Сколько топ-моделей взять для перебора (Макс 20)")
+    parser.add_argument("--max_k", type=int, default=20, help="Сколько топ-моделей взять для перебора (Макс 30)")
     args = parser.parse_args()
     
     main(args)
