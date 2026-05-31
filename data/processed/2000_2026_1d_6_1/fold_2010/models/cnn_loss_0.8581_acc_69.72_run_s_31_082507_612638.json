@@ -1,5 +1,5 @@
 {
-    "model_name": "cnn_loss_0.8622_acc_67.14_run_s_30_233012_61694f.keras",
+    "model_name": "cnn_loss_0.8581_acc_69.72_run_s_31_082507_612638.keras",
     "arch": "cnn",
     "architecture_snapshot": {
         "module": "keras.src.models.functional",
@@ -1056,7 +1056,7 @@
                 "class_name": "AdamW",
                 "config": {
                     "name": "adamw",
-                    "learning_rate": 0.0020000000949949026,
+                    "learning_rate": 0.0005000000237487257,
                     "weight_decay": 1e-05,
                     "clipnorm": 1.0,
                     "global_clipnorm": null,
@@ -1107,16 +1107,16 @@
         "bonus_ratio": 0.2,
         "min_delta": 0.001
     },
-    "run_id": "run_s_30_233012_61694f",
+    "run_id": "run_s_31_082507_612638",
     "dataset": "2000_2026_1d_6_1",
     "fold": "fold_2010",
     "seq_len": 6,
     "n_features": 69,
     "metrics": {
-        "val_loss": 0.8622367978096008,
-        "val_acc": 67.14388132095337
+        "val_loss": 0.8581185936927795,
+        "val_acc": 69.72082853317261
     },
     "training_stats": {
-        "training_time_seconds": 39.84433054924011
+        "training_time_seconds": 35.7950074672699
     }
 }
