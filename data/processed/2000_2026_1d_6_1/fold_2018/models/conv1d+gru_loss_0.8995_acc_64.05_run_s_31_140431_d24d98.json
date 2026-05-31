@@ -1,5 +1,5 @@
 {
-    "model_name": "conv1d+gru_loss_0.9009_acc_64.21_run_s_31_094158_d1f0ab.keras",
+    "model_name": "conv1d+gru_loss_0.8995_acc_64.05_run_s_31_140431_d24d98.keras",
     "arch": "conv1d+gru",
     "architecture_snapshot": {
         "module": "keras.src.models.functional",
@@ -586,7 +586,7 @@
                 "class_name": "AdamW",
                 "config": {
                     "name": "adamw",
-                    "learning_rate": 0.0005000000237487257,
+                    "learning_rate": 0.0010000000474974513,
                     "weight_decay": 1e-05,
                     "clipnorm": 1.0,
                     "global_clipnorm": null,
@@ -637,16 +637,16 @@
         "bonus_ratio": 0.2,
         "min_delta": 0.001
     },
-    "run_id": "run_s_31_094158_d1f0ab",
+    "run_id": "run_s_31_140431_d24d98",
     "dataset": "2000_2026_1d_6_1",
     "fold": "fold_2018",
     "seq_len": 6,
     "n_features": 71,
     "metrics": {
-        "val_loss": 0.90085369348526,
-        "val_acc": 64.21433091163635
+        "val_loss": 0.8995192646980286,
+        "val_acc": 64.05371427536011
     },
     "training_stats": {
-        "training_time_seconds": 542.8943481445312
+        "training_time_seconds": 114.21061849594116
     }
 }
