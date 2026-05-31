@@ -182,15 +182,19 @@ def main():
     plt.legend(by_label.values(), by_label.keys(), loc='upper right')
     
     plt.grid(alpha=0.3, linestyle='--')
-    
-    if successful_boots >= 10:
-        # Берем минимум между нижней границей асимптоты и ФАКТИЧЕСКИМ рекордом
-        lowest_point = min(q5_c, np.min(y_fit_raw))
-        y_lim_bottom = lowest_point - 0.015
-    else:
-        y_lim_bottom = np.min(y_fit_raw) - 0.02
-        
-    plt.ylim(y_lim_bottom, valid_max)
+
+    global_max = np.max(y_fit_raw)
+    global_min = np.min(y_fit_raw)
+    amplitude = global_max - global_min
+
+    margin = amplitude * 0.05 if amplitude > 0 else 0.005
+
+    y_lim_top = global_max + margin
+    y_lim_bottom = global_min - margin
+
+    # Если линия асимптоты или доверительного интервала (q5_c/q95_c) уходит 
+    # за эти рамки, мы её обрезаем, чтобы масштаб не ломался
+    plt.ylim(y_lim_bottom, y_lim_top)
     plt.show()
 if __name__ == "__main__":
     main()

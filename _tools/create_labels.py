@@ -27,11 +27,23 @@ def _apply_triple_barrier(prices: np.ndarray, highs: np.ndarray, lows: np.ndarra
     for i in range(n_rows - horizon):
         entry_price = prices[i]
         if entry_price == 0 or np.isnan(entry_price): continue
+        
         for j in range(1, horizon + 1):
-            if lows[i + j] <= entry_price * (1 - sl_factor):
+            # 🚨 ФИКС №3: Обработка коллизий внутри одного дня (High-Low Logic)
+            hit_sl = lows[i + j] <= entry_price * (1 - sl_factor)
+            hit_tp = highs[i + j] >= entry_price * (1 + tp_factor)
+            
+            if hit_sl and hit_tp:
+                # ПЕССИМИСТИЧНЫЙ СЦЕНАРИЙ: 
+                # Если в течение дня пробиты ОБА барьера (волатильная свеча),
+                # мы обязаны считать, что сначала выбило стоп-лосс. 
+                # Это единственное правило, защищающее депозит в бэктестах на D1.
                 labels[i] = -1.0
                 break
-            elif highs[i + j] >= entry_price * (1 + tp_factor):
+            elif hit_sl:
+                labels[i] = -1.0
+                break
+            elif hit_tp:
                 labels[i] = 1.0
                 break
     return labels
@@ -66,7 +78,6 @@ def main():
 
     final_tp, final_sl = args.tp, args.sl
     
-    # ФИКС: РАСЧЕТ ИЗОЛИРОВАНО ПО ТИКЕРАМ
     if args.auto:
         valid_max_all, valid_min_all = [], []
         for ticker, group in df.groupby('ticker'):
@@ -87,7 +98,7 @@ def main():
     
     with ProcessPoolExecutor(max_workers=args.workers) as executor:
         futures = {executor.submit(process_ticker, group['ticker'].iloc[0], group, args.horizon, final_tp, final_sl): i for i, group in enumerate(grouped_data)}
-        for future in tqdm(as_completed(futures), total=len(futures), desc="Разметка"):
+        for future in tqdm(as_completed(futures), total=len(futures), desc="Разметка (Пессимистичный Тройной Барьер)"):
             try: processed_dfs.append(future.result())
             except Exception as e: print(f"❌ Ошибка: {e}")
 
