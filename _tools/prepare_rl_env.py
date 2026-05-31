@@ -93,6 +93,13 @@ def main():
             val_df = pd.read_parquet(val_parquet)
             val_df['datetime'] = pd.to_datetime(val_df['datetime'])
             
+            # Вытаскиваем год из названия фолда (например, "fold_2010" -> 2010)
+            fold_year = int(fold_name.split('_')[1])
+
+            # ОСТАВЛЯЕМ ТОЛЬКО ПЕРВЫЙ ГОД ВАЛИДАЦИИ (устраняем нахлест)
+            val_df = val_df[val_df['datetime'].dt.year == fold_year]
+
+            # Дальше идет ваш стандартный код...
             X_val, y_val, dates_val, tickers_val = create_sequences(val_df, feature_cols, lookback)
             if len(X_val) == 0: continue
 
