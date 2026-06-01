@@ -123,12 +123,13 @@ def main():
                     if args.keep is not None:
                         print(f"\n🧹 Запуск очистки фолда {fold_name} (Оставляем Топ-{args.keep})...")
                         clean_script = str(Path("_tools") / "clean_lstm_models.py")
-                        # Запускаем очистку только для текущего фолда
+                        # Запускаем очистку только для текущего фолда и ПРОСИМ НЕ УДАЛЯТЬ TEMP файлы
                         clean_cmd = [
                             "python", clean_script,
                             "--base_dir", str(DATASET_DIR),
                             "--keep", str(args.keep),
-                            "--target_fold", fold_name # Указываем конкретный фолд
+                            "--target_fold", fold_name,
+                            "--preserve_temp"   # <--- ДОБАВЛЕНА ЭТА СТРОЧКА
                         ]
                         subprocess.run(clean_cmd)
                     

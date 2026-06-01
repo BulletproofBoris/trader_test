@@ -1,5 +1,5 @@
 {
-    "model_name": "cnn_loss_0.8893_acc_65.34_run_manual_48d221.keras",
+    "model_name": "cnn_loss_0.8886_acc_65.70_run_manual_c87d3e.keras",
     "arch": "cnn",
     "architecture_snapshot": {
         "module": "keras.src.models.functional",
@@ -1056,7 +1056,7 @@
                 "class_name": "AdamW",
                 "config": {
                     "name": "adamw",
-                    "learning_rate": 0.0002500000118743628,
+                    "learning_rate": 0.0001250000059371814,
                     "weight_decay": 1e-05,
                     "clipnorm": 1.0,
                     "global_clipnorm": null,
@@ -1107,16 +1107,16 @@
         "bonus_ratio": 0.2,
         "min_delta": 0.001
     },
-    "run_id": "run_manual_48d221",
+    "run_id": "run_manual_c87d3e",
     "dataset": "2000_2026_1d_10_1",
     "fold": "fold_2016",
     "seq_len": 10,
     "n_features": 73,
     "metrics": {
-        "val_loss": 0.8892580270767212,
-        "val_acc": 65.33693671226501
+        "val_loss": 0.8885691165924072,
+        "val_acc": 65.69754481315613
     },
     "training_stats": {
-        "training_time_seconds": 111.86814737319946
+        "training_time_seconds": 53.20566701889038
     }
 }
