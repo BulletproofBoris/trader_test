@@ -10,8 +10,8 @@ venv/
 env/
 .venv-tf/
 
+# --- Служебные папки и логи ---
 xla_cache/
-
 _logs_data_prep/
 
 # --- Файлы IDE и редакторов кода ---
@@ -25,71 +25,81 @@ _logs_data_prep/
 # --- Сгенерированные файлы проекта ---
 # 1. Игнорируем всё СОДЕРЖИМОЕ папки data, но разрешаем Git зайти внутрь
 data/*
-
-!data/raw
-
-# 2. Разрешаем Git спускаться по дереву папок до нужного уровня
+!data/raw/
 !data/processed/
-data/processed/*
 
+# 2. Правила для папки processed (разрешаем спуск по дереву до models)
+data/processed/*
+!data/processed/archive/
+
+# Конфигурация 90:15
 !data/processed/2000_2026_1d_90_15/
 data/processed/2000_2026_1d_90_15/*
-
 !data/processed/2000_2026_1d_90_15/fold_*/
 data/processed/2000_2026_1d_90_15/fold_*/*
 
+# Конфигурация 60:10
 !data/processed/2000_2026_1d_60_10/
 data/processed/2000_2026_1d_60_10/*
-
 !data/processed/2000_2026_1d_60_10/fold_*/
 data/processed/2000_2026_1d_60_10/fold_*/*
 
+# Конфигурация 30:5
 !data/processed/2000_2026_1d_30_5/
 data/processed/2000_2026_1d_30_5/*
-
 !data/processed/2000_2026_1d_30_5/fold_*/
 data/processed/2000_2026_1d_30_5/fold_*/*
 
-!data/processed/2000_2026_1d_18_3/
-data/processed/2000_2026_1d_18_3/*
-
-!data/processed/2000_2026_1d_18_3/fold_*/
-data/processed/2000_2026_1d_18_3/fold_*/*
-
-!data/processed/2000_2026_1d_6_1/
-data/processed/2000_2026_1d_6_1/*
-
-!data/processed/2000_2026_1d_6_1/fold_*/
-data/processed/2000_2026_1d_6_1/fold_*/*
-
+# Конфигурация 20:1
 !data/processed/2000_2026_1d_20_1/
 data/processed/2000_2026_1d_20_1/*
-
 !data/processed/2000_2026_1d_20_1/fold_*/
 data/processed/2000_2026_1d_20_1/fold_*/*
 
+# Конфигурация 18:3
+!data/processed/2000_2026_1d_18_3/
+data/processed/2000_2026_1d_18_3/*
+!data/processed/2000_2026_1d_18_3/fold_*/
+data/processed/2000_2026_1d_18_3/fold_*/*
+
+# Конфигурация 10:5
 !data/processed/2000_2026_1d_10_5/
 data/processed/2000_2026_1d_10_5/*
-
 !data/processed/2000_2026_1d_10_5/fold_*/
 data/processed/2000_2026_1d_10_5/fold_*/*
 
-# 3. Наконец-то разрешаем саму папку models и её содержимое!
+# Конфигурация 10:1 (НОВАЯ)
+!data/processed/2000_2026_1d_10_1/
+data/processed/2000_2026_1d_10_1/*
+!data/processed/2000_2026_1d_10_1/fold_*/
+data/processed/2000_2026_1d_10_1/fold_*/*
+
+# Конфигурация 6:1
+!data/processed/2000_2026_1d_6_1/
+data/processed/2000_2026_1d_6_1/*
+!data/processed/2000_2026_1d_6_1/fold_*/
+data/processed/2000_2026_1d_6_1/fold_*/*
+
+# 3. Наконец-то разрешаем саму папку models и её содержимое для всех конфигураций!
 !data/processed/2000_2026_1d_90_15/fold_*/models/
 !data/processed/2000_2026_1d_60_10/fold_*/models/
 !data/processed/2000_2026_1d_30_5/fold_*/models/
-!data/processed/2000_2026_1d_18_3/fold_*/models/
-!data/processed/2000_2026_1d_6_1/fold_*/models/
 !data/processed/2000_2026_1d_20_1/fold_*/models/
+!data/processed/2000_2026_1d_18_3/fold_*/models/
 !data/processed/2000_2026_1d_10_5/fold_*/models/
+!data/processed/2000_2026_1d_10_1/fold_*/models/
+!data/processed/2000_2026_1d_6_1/fold_*/models/
 
 
-!data/processed/archive
-# Все результаты, логи, графики и модели
+# --- Глобальные исключения для тяжелых файлов ---
+# Все результаты, логи, графики и веса
 *.log
 *.png
 *.pkl
 *.h5
+#*.keras
+*.tfrecord
+*.parquet
 
 # --- Временные и служебные файлы ---
 # Файлы, которые могут случайно появиться в корневой папке

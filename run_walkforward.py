@@ -32,6 +32,9 @@ def main():
     parser.add_argument("--track_trajectory", action="store_true", help="Включить запись траектории весов (landscape_*.h5)")
 
     parser.add_argument("--arch", type=str, default="conv1d+gru", help="Какую архитектуру учить (conv1d+gru, cnn)")
+    
+    # 🚨 НОВЫЙ ПАРАМЕТР ДЛЯ АВТООЧИСТКИ 🚨
+    parser.add_argument("--keep", type=int, default=None, help="Сколько лучших моделей оставить в фолде после завершения. Очистка не удаляет временные файлы.")
 
     args = parser.parse_args()
 
@@ -87,7 +90,6 @@ def main():
                 "--min_delta", str(args.min_delta),
                 "--factor", str(args.factor),
                 "--patience", str(args.patience)
-                # УБРАНЫ ПРЯМЫЕ ССЫЛКИ НА PCA ОТСЮДА
             ]
             
             if args.append:
@@ -116,6 +118,20 @@ def main():
                     
                 elif process.returncode == 0:
                     print(f"✅ [{fold_name}] Завершен успешно!")
+                    
+                    # 🚨 АВТООЧИСТКА ПОСЛЕ УСПЕШНОГО ЗАВЕРШЕНИЯ ФОЛДА 🚨
+                    if args.keep is not None:
+                        print(f"\n🧹 Запуск очистки фолда {fold_name} (Оставляем Топ-{args.keep})...")
+                        clean_script = str(Path("_tools") / "clean_lstm_models.py")
+                        # Запускаем очистку только для текущего фолда
+                        clean_cmd = [
+                            "python", clean_script,
+                            "--base_dir", str(DATASET_DIR),
+                            "--keep", str(args.keep),
+                            "--target_fold", fold_name # Указываем конкретный фолд
+                        ]
+                        subprocess.run(clean_cmd)
+                    
                     break     # Выходим из while, переходим к СЛЕДУЮЩЕМУ фолду
                     
                 else:

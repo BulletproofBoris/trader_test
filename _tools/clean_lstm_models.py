@@ -5,9 +5,13 @@ from pathlib import Path
 
 def main():
     parser = argparse.ArgumentParser(description="Глобальная очистка моделей и логов с подробным отчетом")
-    parser.add_argument("--base_dir", type=str, default="data/processed", help="Путь к базовой папке с моделями")
+    parser.add_argument("--base_dir", type=str, default="data/processed", help="Путь к базовой папке с моделями (или конкретному датасету)")
     parser.add_argument("--logs_dir", type=str, default=".", help="Папка, где лежат лог-файлы (по умолчанию текущая)")
     parser.add_argument("--keep", type=int, default=5, help="Сколько лучших моделей оставить")
+    
+    # 🚨 НОВЫЙ АРГУМЕНТ ДЛЯ ЦЕЛЕВОГО ФОЛДА 🚨
+    parser.add_argument("--target_fold", type=str, default=None, help="Имя конкретного фолда для очистки (если не указано, ищутся все)")
+    
     args = parser.parse_args()
     
     base_dir = Path(args.base_dir)
@@ -17,31 +21,41 @@ def main():
         print(f"❌ Ошибка: {base_dir} не найдена!")
         sys.exit(1)
 
-    print(f"🧹 Запуск ГЛОБАЛЬНОЙ уборки...")
-    print(f"   📂 Модели: {base_dir} (Оставляем Топ-{args.keep})")
-    print(f"   📜 Логи: {logs_dir}/worker_swarm_*.log")
+    print(f"🧹 Запуск уборки...")
+    print(f"   📂 Цель: {base_dir} (Оставляем Топ-{args.keep})")
+    if args.target_fold:
+         print(f"   🎯 Фолд: {args.target_fold}")
     
-    # 1. ОЧИСТКА ЛОГОВ (worker_swarm_*.log)
+    # 1. ОЧИСТКА ЛОГОВ (worker_swarm_*.log) - Опционально, можно отключить
     deleted_logs = 0
     for log_file in logs_dir.glob("worker_swarm_*.log"):
         try:
             log_file.unlink()
             deleted_logs += 1
         except Exception as e:
-            print(f"   ⚠️ Не удалось удалить лог {log_file.name}: {e}")
+            pass # Игнорируем ошибки удаления логов
     
-    if deleted_logs > 0:
-        print(f"   🧹 Удалено лог-файлов воркеров: {deleted_logs}")
-
     # 2. ОЧИСТКА МОДЕЛЕЙ
-    dataset_dirs = sorted([d for d in base_dir.iterdir() if d.is_dir()])
+    
+    # Определяем, передали ли нам папку датасета или базовую 'processed'
+    if base_dir.name.startswith("20") and "1d" in base_dir.name:
+         dataset_dirs = [base_dir]
+    else:
+         dataset_dirs = sorted([d for d in base_dir.iterdir() if d.is_dir() and "1d" in d.name])
     
     grand_total_deleted = 0
-    grand_total_temp = 0
     grand_total_kept = 0
 
     for dataset_dir in dataset_dirs:
-        folds = sorted([d for d in dataset_dir.glob("fold_*") if d.is_dir()])
+        # Фильтруем фолды, если указан таргет
+        if args.target_fold:
+            folds = [dataset_dir / args.target_fold]
+            if not folds[0].exists():
+                print(f"⚠️ Фолд {args.target_fold} не найден в {dataset_dir.name}")
+                continue
+        else:
+            folds = sorted([d for d in dataset_dir.glob("fold_*") if d.is_dir()])
+            
         if not folds: continue
 
         print("\n" + "="*80)
@@ -54,37 +68,13 @@ def main():
 
             print(f"\n📂 Фолд: {fold_dir.name}")
             
-            # Очистка временного мусора
-            temp_files = []
-            for f in models_dir.iterdir():
-                is_trash = False
-                name = f.name
-                if f.is_file():
-                    if name.startswith("temp_") or name.endswith(".h5") or name.endswith(".weights.h5"):
-                        is_trash = True
-                    elif f.suffix in [".tmp", ".temp", ".part", ".index", ".data-00000-of-00001"]:
-                        is_trash = True
-                    elif name == "checkpoint":
-                        is_trash = True
-                elif f.is_dir() and name.endswith(".tmp"):
-                    is_trash = True
-                
-                if is_trash:
-                    temp_files.append(f)
-
-            for tf_path in temp_files:
-                try:
-                    if tf_path.is_file(): tf_path.unlink()
-                    else: shutil.rmtree(tf_path)
-                    grand_total_temp += 1
-                except Exception: pass
+            # Временные файлы БОЛЬШЕ НЕ УДАЛЯЕМ, их чистят сами воркеры
             
             # Фильтрация моделей
             keras_files = list(models_dir.glob("*.keras"))
             valid_models = []
 
             for m_file in keras_files:
-                if m_file in temp_files: continue
                 json_file = m_file.with_suffix(".json")
                 
                 val_loss = float('inf')
@@ -107,7 +97,7 @@ def main():
                 
                 valid_models.append({"path": m_file, "json": json_file, "loss": val_loss, "acc": val_acc, "run": run_id, "arch": arch})
 
-            # === НОВАЯ ЛОГИКА: ГРУППИРОВКА ПО АРХИТЕКТУРАМ ===
+            # ГРУППИРОВКА ПО АРХИТЕКТУРАМ
             models_by_arch = {}
             for m in valid_models:
                 a = m["arch"]
@@ -146,7 +136,6 @@ def main():
     print("="*80)
     print(f"🟢 Моделей сохранено:      {grand_total_kept}")
     print(f"🔴 Удалено моделей:         {grand_total_deleted}")
-    print(f"📜 Удалено логов воркеров:  {deleted_logs}")
     print("="*80)
 
 if __name__ == "__main__":
