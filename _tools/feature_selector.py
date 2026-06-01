@@ -47,7 +47,7 @@ def get_dynamic_feature_importance(df, feature_cols, target_col='label', cumulat
         num_leaves=64,
         max_bin=255,       # Оптимизация построения гистограмм для скорости
         random_state=42, 
-        n_jobs=-1,         # Включаем все доступные потоки
+        n_jobs=4,         #-1 Включаем все доступные потоки
         verbose=-1
     )
     
