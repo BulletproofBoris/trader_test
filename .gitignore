@@ -10,6 +10,10 @@ venv/
 env/
 .venv-tf/
 
+xla_cache/
+
+_logs_data_prep/
+
 # --- Файлы IDE и редакторов кода ---
 .vscode/
 .idea/
@@ -23,10 +27,6 @@ env/
 data/*
 
 !data/raw
-
-/home/restorator/trader_test/xla_cache/*
-
-/home/restorator/trader_test/_logs_data_prep/*
 
 # 2. Разрешаем Git спускаться по дереву папок до нужного уровня
 !data/processed/
