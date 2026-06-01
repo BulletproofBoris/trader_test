@@ -1032,7 +1032,7 @@
     📦 Проверка TFRecord (data.tfrecord):
       ✅ Читаемость: OK
       📐 Shape тензора: (30, 71) (Lookback x Features)
-      ❌ ОШИБКА ЧТЕНИЯ: {{function_node __wrapped__IteratorGetNext_output_types_1_device_/job:localhost/replica:0/task:0/device:CPU:0}} truncated record at 1009041618' failed with Read less bytes than requested [Op:IteratorGetNext] name: 
+      🔢 Всего примеров (окон): 143957
     📊 Физика фичей: Mean=0.0000, Std=1.0000
   🔹 VAL (Parquet: 25764 строк):
     SL (-1)   :  25.89%
@@ -1055,7 +1055,7 @@
     📦 Проверка TFRecord (data.tfrecord):
       ✅ Читаемость: OK
       📐 Shape тензора: (30, 71) (Lookback x Features)
-      ❌ ОШИБКА ЧТЕНИЯ: {{function_node __wrapped__IteratorGetNext_output_types_1_device_/job:localhost/replica:0/task:0/device:CPU:0}} truncated record at 294928946' failed with Read less bytes than requested [Op:IteratorGetNext] name: 
+      🔢 Всего примеров (окон): 155620
     📊 Физика фичей: Mean=0.0000, Std=1.0000
   🔹 VAL (Parquet: 26750 строк):
     SL (-1)   :  25.24%
