@@ -2,6 +2,7 @@ import sys
 import os
 import json
 import argparse
+from tqdm import tqdm
 from pathlib import Path
 import pandas as pd
 import numpy as np
@@ -36,9 +37,11 @@ def get_dynamic_feature_importance(df, feature_cols, target_col='label', cumulat
     X = sample_df[feature_cols].astype(np.float32)
     y = (sample_df[target_col] + 1).astype(int)
     
+    n_estimators = 100
+    
     # Агрессивные параметры для скорости (n_jobs=-1 задействует все ядра CPU)
     model = lgb.LGBMClassifier(
-        n_estimators=100,
+        n_estimators=n_estimators,
         learning_rate=0.1,
         max_depth=7,
         num_leaves=64,
@@ -47,7 +50,11 @@ def get_dynamic_feature_importance(df, feature_cols, target_col='label', cumulat
         n_jobs=-1,         # Включаем все доступные потоки
         verbose=-1
     )
-    model.fit(X, y)
+    
+    # Обертка tqdm для визуализации процесса обучения (100 деревьев)
+    with tqdm(total=n_estimators, desc="  🌲 Построение деревьев", unit=" итер", ncols=100, force_tty=True) as pbar:
+        # Передаем callback, который будет обновлять полосу после каждого дерева
+        model.fit(X, y, callbacks=[lambda env: pbar.update(1)])
     
     importance = model.feature_importances_
     imp_df = pd.DataFrame({'feature': feature_cols, 'importance': importance})
