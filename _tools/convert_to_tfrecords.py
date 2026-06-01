@@ -17,7 +17,7 @@ def process_and_write(df, lookback, output_path, feature_cols):
     samples_count = 0
     
     # Группируем по тикерам, чтобы случайно не склеить конец Сбербанка с началом Газпрома
-    for ticker, group in tqdm(df.groupby('ticker'), desc=f"Запись {Path(output_path).name}", force_tty=True, ncols=100):
+    for ticker, group in tqdm(df.groupby('ticker'), desc=f"Запись {Path(output_path).name}", ncols=100, mininterval=2.0):
         group = group.sort_values('datetime')
         features = group[feature_cols].values.astype(np.float32)
         

@@ -64,7 +64,7 @@ def main():
     cs_features = create_cross_sectional_features(all_data_dict)
     processed_dfs = []
     
-    for ticker, group_idx in tqdm(all_data_dict.items(), desc="Индивидуальные фичи", force_tty=True, ncols=100):
+    for ticker, group_idx in tqdm(all_data_dict.items(), desc="Индивидуальные фичи", ncols=100, mininterval=2.0):
         res_ticker, df_with_features = create_individual_features((ticker, group_idx), external_data, cs_features)
         if 'datetime' not in df_with_features.columns:
             df_with_features.reset_index(inplace=True)

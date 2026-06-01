@@ -98,7 +98,7 @@ def main():
     
     with ProcessPoolExecutor(max_workers=args.workers) as executor:
         futures = {executor.submit(process_ticker, group['ticker'].iloc[0], group, args.horizon, final_tp, final_sl): i for i, group in enumerate(grouped_data)}
-        for future in tqdm(as_completed(futures), total=len(futures), desc="Разметка (Пессимистичный Тройной Барьер)", force_tty=True, ncols=100):
+        for future in tqdm(as_completed(futures), total=len(futures), desc="Разметка (Пессимистичный Тройной Барьер)", ncols=100, mininterval=2.0):
             try: processed_dfs.append(future.result())
             except Exception as e: print(f"❌ Ошибка: {e}")
 

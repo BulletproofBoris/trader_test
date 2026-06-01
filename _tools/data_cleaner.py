@@ -90,7 +90,7 @@ def clean_and_adjust_data(df):
     df.columns = [c.lower() for c in df.columns]
     
     cleaned_dfs = []
-    for ticker in tqdm(df['ticker'].unique(), desc="Корректировка сплитов", force_tty=True, ncols=100):
+    for ticker in tqdm(df['ticker'].unique(), desc="Корректировка сплитов", ncols=100, mininterval=2.0):
         cleaned_dfs.append(apply_corporate_actions(df[df['ticker'] == ticker], ticker))
         
     final_df = pd.concat(cleaned_dfs, ignore_index=True)

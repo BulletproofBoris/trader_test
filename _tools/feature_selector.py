@@ -52,7 +52,7 @@ def get_dynamic_feature_importance(df, feature_cols, target_col='label', cumulat
     )
     
     # Обертка tqdm для визуализации процесса обучения (100 деревьев)
-    with tqdm(total=n_estimators, desc="  🌲 Построение деревьев", unit=" итер", ncols=100, force_tty=True) as pbar:
+    with tqdm(total=n_estimators, desc="  🌲 Построение деревьев", unit=" итер", ncols=100, mininterval=1.0) as pbar:
         # Передаем callback, который будет обновлять полосу после каждого дерева
         model.fit(X, y, callbacks=[lambda env: pbar.update(1)])
     
