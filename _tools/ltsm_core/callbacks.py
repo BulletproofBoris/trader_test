@@ -21,7 +21,7 @@ class ElasticPatienceProfiler(Callback):
         self.pruned = False
         self.pending_msgs = [] # Хранилище отложенных сообщений
         
-        self.micro_patience = max(1, int(0.25 * max_epochs))
+        self.micro_patience = max(1, int(0.12 * max_epochs))
         self.macro_patience = max(3.0, float(0.3 * max_epochs))
         self.macro_bonus = bonus_ratio * self.micro_patience 
         self.min_delta = min_delta 
@@ -127,7 +127,7 @@ class ElasticPatienceProfiler(Callback):
 
 
 class SmartBacktrackCallback(Callback):
-    def __init__(self, best_weights_path, monitor_loss='val_loss', factor=0.5, patience=3, min_lr=1e-6, max_rollbacks=5):
+    def __init__(self, best_weights_path, monitor_loss='val_loss', factor=0.5, patience=3, min_lr=1e-6, max_rollbacks=3):
         super().__init__()
         # 🛡️ ПРИНУДИТЕЛЬНО ФИКСИРУЕМ ПАРАМЕТРЫ (Защита от сбоев оркестратора)
         self.monitor_loss = monitor_loss
