@@ -1,5 +1,5 @@
 {
-    "model_name": "attention_loss_0.9115_acc_63.13_run_s_02_150625_dc2ebd.keras",
+    "model_name": "attention_loss_0.9110_acc_63.56_run_s_02_230138_90ca45.keras",
     "arch": "attention",
     "architecture_snapshot": {
         "module": "keras.src.models.functional",
@@ -918,16 +918,16 @@
         "bonus_ratio": 0.2,
         "min_delta": 0.001
     },
-    "run_id": "run_s_02_150625_dc2ebd",
+    "run_id": "run_s_02_230138_90ca45",
     "dataset": "2000_2026_1d_10_1",
     "fold": "fold_2012",
     "seq_len": 10,
     "n_features": 69,
     "metrics": {
-        "val_loss": 0.9114565849304199,
-        "val_acc": 63.13420534133911
+        "val_loss": 0.9109582901000977,
+        "val_acc": 63.55871558189392
     },
     "training_stats": {
-        "training_time_seconds": 23.472407817840576
+        "training_time_seconds": 25.089601755142212
     }
 }
