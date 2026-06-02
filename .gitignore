@@ -18,6 +18,9 @@ _logs_data_prep/
 .vscode/
 .idea/
 
+# Windows Zone.Identifier
+*:Zone.Identifier
+
 # --- Критически важные секретные данные ---
 # Никогда не добавляйте ваш API-токен в Git!
 .env
