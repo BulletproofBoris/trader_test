@@ -140,7 +140,7 @@ data/processed/2000_2026_1d_3_1/fold_*/*
 *.png
 *.pkl
 *.h5
-*.keras
+#*.keras
 *.tfrecord
 *.parquet
 
