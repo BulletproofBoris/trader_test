@@ -1,5 +1,5 @@
 {
-    "model_name": "cnn_loss_0.8609_acc_68.88_run_manual_8f66d0.keras",
+    "model_name": "cnn_loss_0.8482_acc_69.21_run_s_03_194634_6e696f.keras",
     "arch": "cnn",
     "architecture_snapshot": {
         "module": "keras.src.models.functional",
@@ -247,7 +247,7 @@
                         },
                         "filters": 16,
                         "kernel_size": [
-                            4
+                            5
                         ],
                         "strides": [
                             1
@@ -495,7 +495,7 @@
                         },
                         "filters": 16,
                         "kernel_size": [
-                            4
+                            5
                         ],
                         "strides": [
                             1
@@ -817,7 +817,7 @@
                             },
                             "registered_name": null
                         },
-                        "rate": 0.15,
+                        "rate": 0.2,
                         "seed": null,
                         "noise_shape": null
                     },
@@ -862,7 +862,7 @@
                             },
                             "registered_name": null
                         },
-                        "units": 32,
+                        "units": 16,
                         "activation": "gelu",
                         "use_bias": true,
                         "kernel_initializer": {
@@ -936,7 +936,7 @@
                             },
                             "registered_name": null
                         },
-                        "rate": 0.15,
+                        "rate": 0.2,
                         "seed": null,
                         "noise_shape": null
                     },
@@ -950,7 +950,7 @@
                                     "config": {
                                         "shape": [
                                             null,
-                                            32
+                                            16
                                         ],
                                         "dtype": "float32",
                                         "keras_history": [
@@ -1007,7 +1007,7 @@
                     "build_config": {
                         "input_shape": [
                             null,
-                            32
+                            16
                         ]
                     },
                     "name": "out",
@@ -1019,7 +1019,7 @@
                                     "config": {
                                         "shape": [
                                             null,
-                                            32
+                                            16
                                         ],
                                         "dtype": "float32",
                                         "keras_history": [
@@ -1056,7 +1056,7 @@
                 "class_name": "AdamW",
                 "config": {
                     "name": "adamw",
-                    "learning_rate": 0.0020000000949949026,
+                    "learning_rate": 0.0005000000237487257,
                     "weight_decay": 1e-05,
                     "clipnorm": 1.0,
                     "global_clipnorm": null,
@@ -1103,20 +1103,20 @@
         "phys_batch": 1024,
         "epochs": 100,
         "factor": 0.5,
-        "patience": 5,
+        "patience": 3,
         "bonus_ratio": 0.2,
         "min_delta": 0.001
     },
-    "run_id": "run_manual_8f66d0",
+    "run_id": "run_s_03_194634_6e696f",
     "dataset": "2000_2026_1d_10_1",
     "fold": "fold_2010",
     "seq_len": 10,
     "n_features": 69,
     "metrics": {
-        "val_loss": 0.8609235882759094,
-        "val_acc": 68.87632608413696
+        "val_loss": 0.848201334476471,
+        "val_acc": 69.21318769454956
     },
     "training_stats": {
-        "training_time_seconds": 34.515064001083374
+        "training_time_seconds": 21.99115514755249
     }
 }

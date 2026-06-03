@@ -65,11 +65,11 @@ def _create_cnn_model(seq_len, n_features, l2_reg):
 
     # 3. Вытягиваем в вектор (Без потери времени!)
     x = Flatten()(x)
-    x = Dropout(0.2)(x)
+    x = Dropout(0.08)(x)
 
     # 4. Классификатор
     x = Dense(16, activation='gelu', kernel_regularizer=regularizers.l2(l2_reg))(x)
-    x = Dropout(0.2)(x)
+    x = Dropout(0.08)(x)
     
     outputs = Dense(3, activation='softmax', name='out')(x)
     return Model(inputs=inputs, outputs=outputs)

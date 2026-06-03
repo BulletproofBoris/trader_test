@@ -1,5 +1,5 @@
 {
-    "model_name": "cnn_loss_0.8645_acc_68.91_run_s_03_194226_c1ea1e.keras",
+    "model_name": "cnn_loss_0.8460_acc_70.80_run_s_03_194634_90f011.keras",
     "arch": "cnn",
     "architecture_snapshot": {
         "module": "keras.src.models.functional",
@@ -245,7 +245,7 @@
                             },
                             "registered_name": null
                         },
-                        "filters": 8,
+                        "filters": 16,
                         "kernel_size": [
                             5
                         ],
@@ -363,7 +363,7 @@
                         "input_shape": [
                             null,
                             10,
-                            8
+                            16
                         ]
                     },
                     "name": "layer_normalization_1",
@@ -376,7 +376,7 @@
                                         "shape": [
                                             null,
                                             10,
-                                            8
+                                            16
                                         ],
                                         "dtype": "float32",
                                         "keras_history": [
@@ -418,7 +418,7 @@
                                         "shape": [
                                             null,
                                             10,
-                                            8
+                                            16
                                         ],
                                         "dtype": "float32",
                                         "keras_history": [
@@ -462,7 +462,7 @@
                                         "shape": [
                                             null,
                                             10,
-                                            8
+                                            16
                                         ],
                                         "dtype": "float32",
                                         "keras_history": [
@@ -493,7 +493,7 @@
                             },
                             "registered_name": null
                         },
-                        "filters": 8,
+                        "filters": 16,
                         "kernel_size": [
                             5
                         ],
@@ -540,99 +540,10 @@
                         "input_shape": [
                             null,
                             10,
-                            8
-                        ]
-                    },
-                    "name": "conv1d_2",
-                    "inbound_nodes": [
-                        {
-                            "args": [
-                                {
-                                    "class_name": "__keras_tensor__",
-                                    "config": {
-                                        "shape": [
-                                            null,
-                                            10,
-                                            8
-                                        ],
-                                        "dtype": "float32",
-                                        "keras_history": [
-                                            "dropout",
-                                            0,
-                                            0
-                                        ]
-                                    }
-                                }
-                            ],
-                            "kwargs": {}
-                        }
-                    ]
-                },
-                {
-                    "module": "keras.layers",
-                    "class_name": "Conv1D",
-                    "config": {
-                        "name": "conv1d_3",
-                        "trainable": true,
-                        "dtype": {
-                            "module": "keras",
-                            "class_name": "DTypePolicy",
-                            "config": {
-                                "name": "float32"
-                            },
-                            "registered_name": null
-                        },
-                        "filters": 8,
-                        "kernel_size": [
-                            1
-                        ],
-                        "strides": [
-                            1
-                        ],
-                        "padding": "valid",
-                        "data_format": "channels_last",
-                        "dilation_rate": [
-                            1
-                        ],
-                        "groups": 1,
-                        "activation": "linear",
-                        "use_bias": true,
-                        "kernel_initializer": {
-                            "module": "keras.initializers",
-                            "class_name": "GlorotUniform",
-                            "config": {
-                                "seed": null
-                            },
-                            "registered_name": null
-                        },
-                        "bias_initializer": {
-                            "module": "keras.initializers",
-                            "class_name": "Zeros",
-                            "config": {},
-                            "registered_name": null
-                        },
-                        "kernel_regularizer": {
-                            "module": "keras.regularizers",
-                            "class_name": "L2",
-                            "config": {
-                                "l2": 1e-05
-                            },
-                            "registered_name": null
-                        },
-                        "bias_regularizer": null,
-                        "activity_regularizer": null,
-                        "kernel_constraint": null,
-                        "bias_constraint": null
-                    },
-                    "registered_name": null,
-                    "build_config": {
-                        "input_shape": [
-                            null,
-                            10,
                             16
                         ]
                     },
-                    "name": "conv1d_3",
+                    "name": "conv1d_2",
                     "inbound_nodes": [
                         {
                             "args": [
@@ -646,7 +557,7 @@
                                         ],
                                         "dtype": "float32",
                                         "keras_history": [
-                                            "conv1d",
+                                            "dropout",
                                             0,
                                             0
                                         ]
@@ -700,7 +611,7 @@
                         "input_shape": [
                             null,
                             10,
-                            8
+                            16
                         ]
                     },
                     "name": "layer_normalization_2",
@@ -713,7 +624,7 @@
                                         "shape": [
                                             null,
                                             10,
-                                            8
+                                            16
                                         ],
                                         "dtype": "float32",
                                         "keras_history": [
@@ -749,12 +660,12 @@
                             [
                                 null,
                                 10,
-                                8
+                                16
                             ],
                             [
                                 null,
                                 10,
-                                8
+                                16
                             ]
                         ]
                     },
@@ -769,11 +680,11 @@
                                             "shape": [
                                                 null,
                                                 10,
-                                                8
+                                                16
                                             ],
                                             "dtype": "float32",
                                             "keras_history": [
-                                                "conv1d_3",
+                                                "conv1d",
                                                 0,
                                                 0
                                             ]
@@ -785,7 +696,7 @@
                                             "shape": [
                                                 null,
                                                 10,
-                                                8
+                                                16
                                             ],
                                             "dtype": "float32",
                                             "keras_history": [
@@ -828,7 +739,7 @@
                                         "shape": [
                                             null,
                                             10,
-                                            8
+                                            16
                                         ],
                                         "dtype": "float32",
                                         "keras_history": [
@@ -864,7 +775,7 @@
                         "input_shape": [
                             null,
                             10,
-                            8
+                            16
                         ]
                     },
                     "name": "flatten",
@@ -877,7 +788,7 @@
                                         "shape": [
                                             null,
                                             10,
-                                            8
+                                            16
                                         ],
                                         "dtype": "float32",
                                         "keras_history": [
@@ -920,7 +831,7 @@
                                     "config": {
                                         "shape": [
                                             null,
-                                            80
+                                            160
                                         ],
                                         "dtype": "float32",
                                         "keras_history": [
@@ -951,7 +862,7 @@
                             },
                             "registered_name": null
                         },
-                        "units": 32,
+                        "units": 16,
                         "activation": "gelu",
                         "use_bias": true,
                         "kernel_initializer": {
@@ -984,7 +895,7 @@
                     "build_config": {
                         "input_shape": [
                             null,
-                            80
+                            160
                         ]
                     },
                     "name": "dense",
@@ -996,7 +907,7 @@
                                     "config": {
                                         "shape": [
                                             null,
-                                            80
+                                            160
                                         ],
                                         "dtype": "float32",
                                         "keras_history": [
@@ -1039,7 +950,7 @@
                                     "config": {
                                         "shape": [
                                             null,
-                                            32
+                                            16
                                         ],
                                         "dtype": "float32",
                                         "keras_history": [
@@ -1096,7 +1007,7 @@
                     "build_config": {
                         "input_shape": [
                             null,
-                            32
+                            16
                         ]
                     },
                     "name": "out",
@@ -1108,7 +1019,7 @@
                                     "config": {
                                         "shape": [
                                             null,
-                                            32
+                                            16
                                         ],
                                         "dtype": "float32",
                                         "keras_history": [
@@ -1145,7 +1056,7 @@
                 "class_name": "AdamW",
                 "config": {
                     "name": "adamw",
-                    "learning_rate": 0.0005000000237487257,
+                    "learning_rate": 0.0020000000949949026,
                     "weight_decay": 1e-05,
                     "clipnorm": 1.0,
                     "global_clipnorm": null,
@@ -1196,16 +1107,16 @@
         "bonus_ratio": 0.2,
         "min_delta": 0.001
     },
-    "run_id": "run_s_03_194226_c1ea1e",
+    "run_id": "run_s_03_194634_90f011",
     "dataset": "2000_2026_1d_10_1",
     "fold": "fold_2010",
     "seq_len": 10,
     "n_features": 69,
     "metrics": {
-        "val_loss": 0.864482581615448,
-        "val_acc": 68.90640258789062
+        "val_loss": 0.8460243344306946,
+        "val_acc": 70.79523801803589
     },
     "training_stats": {
-        "training_time_seconds": 26.27204656600952
+        "training_time_seconds": 19.893821239471436
     }
 }
