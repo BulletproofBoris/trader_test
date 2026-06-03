@@ -3,6 +3,7 @@ import os, sys
 
 # --- ИСПРАВЛЕНО: Добавлена переменная для отключения oneDNN ---
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0' 
+#os.environ['TF_ENABLE_ONEDNN_OPTS'] = '1' 
 # -----------------------------------------------------------
 
 # Тише до импорта
