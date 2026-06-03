@@ -1,0 +1,16 @@
+{
+    "fold": "fold_2025",
+    "optimal_k": 4,
+    "ensemble_smoothed_loss": 0.9290146316145541,
+    "composition": {
+        "CNN": 2,
+        "ATTENTION": 1,
+        "MLP": 1
+    },
+    "models": [
+        "data/processed/2000_2026_1d_10_1/fold_2025/models/cnn_loss_0.9370_acc_60.33_run_s_01_173034_1abdcd.keras",
+        "data/processed/2000_2026_1d_10_1/fold_2025/models/cnn_loss_0.9387_acc_60.12_run_s_01_173034_bf9392.keras",
+        "data/processed/2000_2026_1d_10_1/fold_2025/models/attention_loss_0.9416_acc_59.62_run_s_02_231700_b8e084.keras",
+        "data/processed/2000_2026_1d_10_1/fold_2025/models/mlp_loss_0.9557_acc_59.97_run_s_03_102042_1fe1ea.keras"
+    ]
+}

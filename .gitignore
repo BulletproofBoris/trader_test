@@ -18,9 +18,6 @@ _logs_data_prep/
 .vscode/
 .idea/
 
-# Windows Zone.Identifier
-*:Zone.Identifier
-
 # --- Критически важные секретные данные ---
 # Никогда не добавляйте ваш API-токен в Git!
 .env
@@ -31,7 +28,7 @@ data/*
 !data/raw/
 !data/processed/
 
-# 2. Правила для папки processed (разрешаем спуск по дереву до models)
+# 2. Правила для папки processed (разрешаем спуск по дереву до нужных папок)
 data/processed/*
 !data/processed/archive/
 
@@ -53,6 +50,12 @@ data/processed/2000_2026_1d_30_5/*
 !data/processed/2000_2026_1d_30_5/fold_*/
 data/processed/2000_2026_1d_30_5/fold_*/*
 
+# Конфигурация 30:1 (НОВАЯ)
+!data/processed/2000_2026_1d_30_1/
+data/processed/2000_2026_1d_30_1/*
+!data/processed/2000_2026_1d_30_1/fold_*/
+data/processed/2000_2026_1d_30_1/fold_*/*
+
 # Конфигурация 20:1
 !data/processed/2000_2026_1d_20_1/
 data/processed/2000_2026_1d_20_1/*
@@ -71,7 +74,7 @@ data/processed/2000_2026_1d_10_5/*
 !data/processed/2000_2026_1d_10_5/fold_*/
 data/processed/2000_2026_1d_10_5/fold_*/*
 
-# Конфигурация 10:1 (НОВАЯ)
+# Конфигурация 10:1
 !data/processed/2000_2026_1d_10_1/
 data/processed/2000_2026_1d_10_1/*
 !data/processed/2000_2026_1d_10_1/fold_*/
@@ -83,24 +86,61 @@ data/processed/2000_2026_1d_6_1/*
 !data/processed/2000_2026_1d_6_1/fold_*/
 data/processed/2000_2026_1d_6_1/fold_*/*
 
-# 3. Наконец-то разрешаем саму папку models и её содержимое для всех конфигураций!
+# Конфигурация 5:10 (НОВАЯ)
+!data/processed/2000_2026_1d_5_10/
+data/processed/2000_2026_1d_5_10/*
+!data/processed/2000_2026_1d_5_10/fold_*/
+data/processed/2000_2026_1d_5_10/fold_*/*
+
+# Конфигурация 3:1 (НОВАЯ)
+!data/processed/2000_2026_1d_3_1/
+data/processed/2000_2026_1d_3_1/*
+!data/processed/2000_2026_1d_3_1/fold_*/
+data/processed/2000_2026_1d_3_1/fold_*/*
+
+
+# 3. Наконец-то разрешаем сами папки models и artifacts и их содержимое для всех конфигураций!
 !data/processed/2000_2026_1d_90_15/fold_*/models/
+!data/processed/2000_2026_1d_90_15/fold_*/artifacts/
+
 !data/processed/2000_2026_1d_60_10/fold_*/models/
+!data/processed/2000_2026_1d_60_10/fold_*/artifacts/
+
 !data/processed/2000_2026_1d_30_5/fold_*/models/
+!data/processed/2000_2026_1d_30_5/fold_*/artifacts/
+
+!data/processed/2000_2026_1d_30_1/fold_*/models/
+!data/processed/2000_2026_1d_30_1/fold_*/artifacts/
+
 !data/processed/2000_2026_1d_20_1/fold_*/models/
+!data/processed/2000_2026_1d_20_1/fold_*/artifacts/
+
 !data/processed/2000_2026_1d_18_3/fold_*/models/
+!data/processed/2000_2026_1d_18_3/fold_*/artifacts/
+
 !data/processed/2000_2026_1d_10_5/fold_*/models/
+!data/processed/2000_2026_1d_10_5/fold_*/artifacts/
+
 !data/processed/2000_2026_1d_10_1/fold_*/models/
+!data/processed/2000_2026_1d_10_1/fold_*/artifacts/
+
 !data/processed/2000_2026_1d_6_1/fold_*/models/
+!data/processed/2000_2026_1d_6_1/fold_*/artifacts/
+
+!data/processed/2000_2026_1d_5_10/fold_*/models/
+!data/processed/2000_2026_1d_5_10/fold_*/artifacts/
+
+!data/processed/2000_2026_1d_3_1/fold_*/models/
+!data/processed/2000_2026_1d_3_1/fold_*/artifacts/
 
 
 # --- Глобальные исключения для тяжелых файлов ---
-# Все результаты, логи, графики и веса
+# Все результаты, логи, графики и веса (не попадут в Git даже из папки artifacts)
 *.log
 *.png
 *.pkl
 *.h5
-#*.keras
+*.keras
 *.tfrecord
 *.parquet
 
@@ -115,3 +155,4 @@ stratified*.csv
 filelist.txt
 organizer.py
 worker_swarm_*.txt
+*:Zone.Identifier
