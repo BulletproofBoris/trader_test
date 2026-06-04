@@ -1,0 +1,21 @@
+{
+    "fold": "fold_2012",
+    "optimal_k": 9,
+    "ensemble_smoothed_loss": 0.9038411641347674,
+    "composition": {
+        "CONV1D+GRU": 4,
+        "CNN": 3,
+        "MLP": 2
+    },
+    "models": [
+        "data/processed/2000_2026_1d_3_1/fold_2012/models/conv1d+gru_loss_0.9101_acc_63.21_run_manual_95178c.keras",
+        "data/processed/2000_2026_1d_3_1/fold_2012/models/conv1d+gru_loss_0.9109_acc_63.25_run_manual_06136e.keras",
+        "data/processed/2000_2026_1d_3_1/fold_2012/models/conv1d+gru_loss_0.9116_acc_63.48_run_manual_430707.keras",
+        "data/processed/2000_2026_1d_3_1/fold_2012/models/conv1d+gru_loss_0.9121_acc_62.96_run_manual_74847f.keras",
+        "data/processed/2000_2026_1d_3_1/fold_2012/models/cnn_loss_0.9123_acc_63.38_run_manual_3c3bde.keras",
+        "data/processed/2000_2026_1d_3_1/fold_2012/models/cnn_loss_0.9127_acc_63.11_run_manual_f03f65.keras",
+        "data/processed/2000_2026_1d_3_1/fold_2012/models/cnn_loss_0.9127_acc_63.51_run_manual_e26f5b.keras",
+        "data/processed/2000_2026_1d_3_1/fold_2012/models/mlp_loss_0.9249_acc_63.62_run_manual_e75c41.keras",
+        "data/processed/2000_2026_1d_3_1/fold_2012/models/mlp_loss_0.9274_acc_63.43_run_manual_d058bb.keras"
+    ]
+}
