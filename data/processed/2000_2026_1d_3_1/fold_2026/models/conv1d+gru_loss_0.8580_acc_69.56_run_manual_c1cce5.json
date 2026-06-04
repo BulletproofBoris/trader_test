@@ -1,5 +1,5 @@
 {
-    "model_name": "conv1d+gru_loss_0.9611_acc_58.27_run_manual_59db65.keras",
+    "model_name": "conv1d+gru_loss_0.8580_acc_69.56_run_manual_c1cce5.keras",
     "arch": "conv1d+gru",
     "architecture_snapshot": {
         "module": "keras.src.models.functional",
@@ -15,7 +15,7 @@
                         "batch_shape": [
                             null,
                             3,
-                            70
+                            69
                         ],
                         "dtype": "float32",
                         "sparse": false,
@@ -54,7 +54,7 @@
                                         "shape": [
                                             null,
                                             3,
-                                            70
+                                            69
                                         ],
                                         "dtype": "float32",
                                         "keras_history": [
@@ -114,7 +114,7 @@
                         "input_shape": [
                             null,
                             3,
-                            70
+                            69
                         ]
                     },
                     "name": "layer_normalization",
@@ -127,7 +127,7 @@
                                         "shape": [
                                             null,
                                             3,
-                                            70
+                                            69
                                         ],
                                         "dtype": "float32",
                                         "keras_history": [
@@ -203,7 +203,7 @@
                         "input_shape": [
                             null,
                             3,
-                            70
+                            69
                         ]
                     },
                     "name": "feature_bottleneck",
@@ -216,7 +216,7 @@
                                         "shape": [
                                             null,
                                             3,
-                                            70
+                                            69
                                         ],
                                         "dtype": "float32",
                                         "keras_history": [
@@ -637,16 +637,16 @@
         "bonus_ratio": 0.2,
         "min_delta": 0.001
     },
-    "run_id": "run_manual_59db65",
+    "run_id": "run_manual_c1cce5",
     "dataset": "2000_2026_1d_3_1",
-    "fold": "fold_2025",
+    "fold": "fold_2026",
     "seq_len": 3,
-    "n_features": 70,
+    "n_features": 69,
     "metrics": {
-        "val_loss": 0.9610785245895386,
-        "val_acc": 58.270263671875
+        "val_loss": 0.8579981923103333,
+        "val_acc": 69.56251263618469
     },
     "training_stats": {
-        "training_time_seconds": 130.57996368408203
+        "training_time_seconds": 77.67067313194275
     }
 }
