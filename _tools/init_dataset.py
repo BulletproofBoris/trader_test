@@ -59,7 +59,7 @@ def main():
 
     args = parser.parse_args()
 
-    BASE_DIR = Path("/home/restorator/trader_test")
+    BASE_DIR = Path(__file__).resolve().parent.parent
     TOOLS_DIR = BASE_DIR / "_tools"
     RAW_DIR = BASE_DIR / "data" / "raw" / args.timeframe
     PROCESSED_BASE = BASE_DIR / "data" / "processed"
