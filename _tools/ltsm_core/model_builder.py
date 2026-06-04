@@ -138,7 +138,7 @@ def _create_attention_model(seq_len, n_features, l2_reg):
     x = Dense(32, kernel_regularizer=regularizers.l2(l2_reg))(x)
     x = LayerNormalization()(x)
     x = Activation('gelu')(x)
-    x = Dropout(0.2)(x)
+    x = Dropout(0.15)(x)
     
     outputs = Dense(3, activation='softmax', name='out')(x)
     return Model(inputs=inputs, outputs=outputs)
