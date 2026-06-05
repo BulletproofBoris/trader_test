@@ -1,5 +1,5 @@
 {
-    "model_name": "attention_loss_0.9766_acc_58.69_run_s_05_080452_57fabb.keras",
+    "model_name": "attention_loss_0.9127_acc_63.97_run_s_05_080452_a3e1c6.keras",
     "arch": "attention",
     "architecture_snapshot": {
         "module": "keras.src.models.functional",
@@ -867,7 +867,7 @@
                 "class_name": "AdamW",
                 "config": {
                     "name": "adamw",
-                    "learning_rate": 0.0020000000949949026,
+                    "learning_rate": 0.0002500000118743628,
                     "weight_decay": 1e-05,
                     "clipnorm": 1.0,
                     "global_clipnorm": null,
@@ -918,16 +918,16 @@
         "bonus_ratio": 0.2,
         "min_delta": 0.001
     },
-    "run_id": "run_s_05_080452_57fabb",
+    "run_id": "run_s_05_080452_a3e1c6",
     "dataset": "2000_2026_1d_3_1",
-    "fold": "fold_2015",
+    "fold": "fold_2016",
     "seq_len": 3,
     "n_features": 73,
     "metrics": {
-        "val_loss": 0.9765692353248596,
-        "val_acc": 58.68525505065918
+        "val_loss": 0.9126585721969604,
+        "val_acc": 63.96889090538025
     },
     "training_stats": {
-        "training_time_seconds": 100.89963388442993
+        "training_time_seconds": 351.28286719322205
     }
 }
