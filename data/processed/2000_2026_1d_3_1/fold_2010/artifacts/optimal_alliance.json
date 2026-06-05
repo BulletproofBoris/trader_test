@@ -1,0 +1,12 @@
+{
+    "fold": "fold_2010",
+    "optimal_k": 2,
+    "ensemble_smoothed_loss": 0.8588999940227557,
+    "composition": {
+        "MLP": 2
+    },
+    "models": [
+        "data/processed/2000_2026_1d_3_1/fold_2010/models/mlp_loss_0.8784_acc_69.46_run_manual_a9f055.keras",
+        "data/processed/2000_2026_1d_3_1/fold_2010/models/mlp_loss_0.8839_acc_67.90_run_manual_3418f8.keras"
+    ]
+}
