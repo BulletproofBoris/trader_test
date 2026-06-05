@@ -1,5 +1,5 @@
 {
-    "model_name": "conv1d+gru_loss_0.9928_acc_55.17_run_s_05_140922_962194.keras",
+    "model_name": "conv1d+gru_loss_0.8793_acc_68.96_run_s_05_154536_74a7b7.keras",
     "arch": "conv1d+gru",
     "architecture_snapshot": {
         "module": "keras.src.models.functional",
@@ -15,7 +15,7 @@
                         "batch_shape": [
                             null,
                             5,
-                            68
+                            69
                         ],
                         "dtype": "float32",
                         "sparse": false,
@@ -54,7 +54,7 @@
                                         "shape": [
                                             null,
                                             5,
-                                            68
+                                            69
                                         ],
                                         "dtype": "float32",
                                         "keras_history": [
@@ -114,7 +114,7 @@
                         "input_shape": [
                             null,
                             5,
-                            68
+                            69
                         ]
                     },
                     "name": "layer_normalization",
@@ -127,7 +127,7 @@
                                         "shape": [
                                             null,
                                             5,
-                                            68
+                                            69
                                         ],
                                         "dtype": "float32",
                                         "keras_history": [
@@ -203,7 +203,7 @@
                         "input_shape": [
                             null,
                             5,
-                            68
+                            69
                         ]
                     },
                     "name": "feature_bottleneck",
@@ -216,7 +216,7 @@
                                         "shape": [
                                             null,
                                             5,
-                                            68
+                                            69
                                         ],
                                         "dtype": "float32",
                                         "keras_history": [
@@ -586,7 +586,7 @@
                 "class_name": "AdamW",
                 "config": {
                     "name": "adamw",
-                    "learning_rate": 0.0010000000474974513,
+                    "learning_rate": 0.0020000000949949026,
                     "weight_decay": 1e-05,
                     "clipnorm": 1.0,
                     "global_clipnorm": null,
@@ -637,16 +637,16 @@
         "bonus_ratio": 0.2,
         "min_delta": 0.001
     },
-    "run_id": "run_s_05_140922_962194",
+    "run_id": "run_s_05_154536_74a7b7",
     "dataset": "2000_2026_1d_5_10",
-    "fold": "fold_2025",
+    "fold": "fold_2026",
     "seq_len": 5,
-    "n_features": 68,
+    "n_features": 69,
     "metrics": {
-        "val_loss": 0.992812991142273,
-        "val_acc": 55.16631007194519
+        "val_loss": 0.8793222904205322,
+        "val_acc": 68.96271109580994
     },
     "training_stats": {
-        "training_time_seconds": 27.23209238052368
+        "training_time_seconds": 48.67473030090332
     }
 }
