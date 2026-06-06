@@ -1,13 +1,16 @@
 {
     "fold": "fold_2022",
-    "optimal_k": 3,
-    "ensemble_smoothed_loss": 0.9515732188462085,
+    "optimal_k": 5,
+    "ensemble_smoothed_loss": 0.951631085675658,
     "composition": {
-        "CONV1D+GRU": 3
+        "CONV1D+GRU": 4,
+        "ATTENTION": 1
     },
     "models": [
         "data/processed/2000_2026_1d_3_1/fold_2022/models/conv1d+gru_loss_0.9553_acc_57.20_run_manual_e3263b.keras",
         "data/processed/2000_2026_1d_3_1/fold_2022/models/conv1d+gru_loss_0.9573_acc_56.45_run_manual_7a3b3c.keras",
-        "data/processed/2000_2026_1d_3_1/fold_2022/models/conv1d+gru_loss_0.9584_acc_56.93_run_manual_5ed904.keras"
+        "data/processed/2000_2026_1d_3_1/fold_2022/models/conv1d+gru_loss_0.9584_acc_56.93_run_manual_5ed904.keras",
+        "data/processed/2000_2026_1d_3_1/fold_2022/models/conv1d+gru_loss_0.9595_acc_56.86_run_manual_4c4ce8.keras",
+        "data/processed/2000_2026_1d_3_1/fold_2022/models/attention_loss_0.9740_acc_56.90_run_s_05_181050_338f0f.keras"
     ]
 }
