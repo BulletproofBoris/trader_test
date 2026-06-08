@@ -1,7 +1,7 @@
 {
     "fold": "fold_2024",
     "optimal_k": 5,
-    "ensemble_smoothed_loss": 0.9685325139588129,
+    "ensemble_smoothed_loss": 0.9685325127093094,
     "composition": {
         "CNN": 2,
         "CONV1D+GRU": 2,
