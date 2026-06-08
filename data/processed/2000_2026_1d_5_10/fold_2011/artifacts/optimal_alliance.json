@@ -1,0 +1,14 @@
+{
+    "fold": "fold_2011",
+    "optimal_k": 4,
+    "ensemble_smoothed_loss": 0.9772825518901916,
+    "composition": {
+        "CONV1D+GRU": 4
+    },
+    "models": [
+        "data/processed/2000_2026_1d_5_10/fold_2011/models/conv1d+gru_loss_0.9854_acc_55.80_run_manual_d03e3d.keras",
+        "data/processed/2000_2026_1d_5_10/fold_2011/models/conv1d+gru_loss_0.9867_acc_55.58_run_manual_2c7c68.keras",
+        "data/processed/2000_2026_1d_5_10/fold_2011/models/conv1d+gru_loss_0.9920_acc_56.45_run_manual_d4e28d.keras",
+        "data/processed/2000_2026_1d_5_10/fold_2011/models/conv1d+gru_loss_0.9937_acc_55.82_run_manual_59dcc4.keras"
+    ]
+}
