@@ -1,0 +1,17 @@
+{
+    "fold": "fold_2025",
+    "optimal_k": 5,
+    "ensemble_smoothed_loss": 0.933920798511329,
+    "composition": {
+        "CONV1D+GRU": 2,
+        "ATTENTION": 2,
+        "MLP": 1
+    },
+    "models": [
+        "data/processed/2000_2026_1d_6_1/fold_2025/models/conv1d+gru_loss_0.9417_acc_59.43_run_s_07_121439_e9f890.keras",
+        "data/processed/2000_2026_1d_6_1/fold_2025/models/conv1d+gru_loss_0.9452_acc_59.66_run_s_07_121439_1ac683.keras",
+        "data/processed/2000_2026_1d_6_1/fold_2025/models/attention_loss_0.9462_acc_58.96_run_s_07_210541_29d452.keras",
+        "data/processed/2000_2026_1d_6_1/fold_2025/models/attention_loss_0.9496_acc_58.86_run_s_07_210541_9cc11d.keras",
+        "data/processed/2000_2026_1d_6_1/fold_2025/models/mlp_loss_0.9565_acc_59.89_run_s_07_121439_a124a3.keras"
+    ]
+}

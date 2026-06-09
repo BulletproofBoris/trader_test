@@ -1,5 +1,5 @@
 {
-    "model_name": "mlp_loss_0.9712_acc_60.25_run_s_08_162611_029e60.keras",
+    "model_name": "mlp_loss_0.9743_acc_58.70_run_s_08_162611_4fffa0.keras",
     "arch": "mlp",
     "architecture_snapshot": {
         "module": "keras.src.models.functional",
@@ -1124,16 +1124,16 @@
         "bonus_ratio": 0.2,
         "min_delta": 0.001
     },
-    "run_id": "run_s_08_162611_029e60",
+    "run_id": "run_s_08_162611_4fffa0",
     "dataset": "2000_2026_1d_18_3",
-    "fold": "fold_2012",
+    "fold": "fold_2013",
     "seq_len": 18,
     "n_features": 69,
     "metrics": {
-        "val_loss": 0.9712196588516235,
-        "val_acc": 60.25480628013611
+        "val_loss": 0.9742691516876221,
+        "val_acc": 58.704936504364014
     },
     "training_stats": {
-        "training_time_seconds": 284.93750071525574
+        "training_time_seconds": 369.85523986816406
     }
 }
