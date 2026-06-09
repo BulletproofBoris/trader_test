@@ -1,5 +1,5 @@
 {
-    "model_name": "conv1d+gru_loss_0.8482_acc_69.48_run_s_09_135211_1fe2a3.keras",
+    "model_name": "conv1d+gru_loss_0.8390_acc_70.12_run_s_09_145730_5c1984.keras",
     "arch": "conv1d+gru",
     "architecture_snapshot": {
         "module": "keras.src.models.functional",
@@ -637,16 +637,16 @@
         "bonus_ratio": 0.2,
         "min_delta": 0.001
     },
-    "run_id": "run_s_09_135211_1fe2a3",
+    "run_id": "run_s_09_145730_5c1984",
     "dataset": "2000_2026_1d_18_3",
     "fold": "fold_2026",
     "seq_len": 18,
     "n_features": 71,
     "metrics": {
-        "val_loss": 0.848238468170166,
-        "val_acc": 69.48209404945374
+        "val_loss": 0.8390164375305176,
+        "val_acc": 70.12412548065186
     },
     "training_stats": {
-        "training_time_seconds": 55.3243567943573
+        "training_time_seconds": 53.516907691955566
     }
 }
