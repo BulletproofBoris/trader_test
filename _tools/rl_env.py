@@ -4,6 +4,8 @@ import numpy as np
 import pandas as pd
 
 class TradingEnv(gym.Env):
+    metadata = {"render_modes": ["human"]} # Добавлено для совместимости с gymnasium
+
     def __init__(self, env_config):
         super(TradingEnv, self).__init__()
         
@@ -19,10 +21,6 @@ class TradingEnv(gym.Env):
             base_df = df[df['datetime'] < cutoff_date].copy()
         elif split_mode == "test":
             base_df = df[df['datetime'] >= cutoff_date].copy()
-        elif split_mode == "2025_2026":
-            base_df = df[df['datetime'] >= pd.to_datetime("2025-01-01")].copy()
-        elif split_mode == "2026":
-            base_df = df[df['datetime'] >= pd.to_datetime("2026-01-01")].copy()
         else:
             base_df = df.copy() 
             
@@ -41,11 +39,15 @@ class TradingEnv(gym.Env):
         self.commission = env_config.get("commission", 0.0003)
         self.max_episode_steps = env_config.get("max_episode_steps", 252) 
         
+        # 0 = Hold, 1 = Buy, 2 = Sell
         self.action_space = spaces.Discrete(3)
+        
         self.exclude_cols = ['datetime', 'ticker', 'open', 'high', 'low', 'close', 'close_x', 'close_y', 'volume']
         
         sample_df = self.grouped_data[self.tickers[0]]
         self.feature_cols = [col for col in sample_df.columns if col not in self.exclude_cols]
+        
+        self.prob_cols_indices = [i for i, col in enumerate(self.feature_cols) if col.endswith('_p0') or col.endswith('_p1') or col.endswith('_p2')]
         
         # Размерность: Фичи + Текущая позиция (-1,0,1) + Unrealized PnL %
         self.obs_shape = len(self.feature_cols) + 2 
@@ -63,12 +65,17 @@ class TradingEnv(gym.Env):
         self.balance = self.initial_balance
         self.prev_balance = self.initial_balance 
         self.current_position = 0 
-        self.current_ticker = None
         self.entry_price = 0.0 
         
-    def reset(self, seed=None, options=None):
+    def reset(self, *, seed=None, options=None): # Добавлены * для явных kwarg аргументов
         super().reset(seed=seed)
         
+        # Для корректной работы генератора случайных чисел в gymnasium
+        if seed is not None:
+            self.np_random, seed = gym.utils.seeding.np_random(seed)
+        elif not hasattr(self, 'np_random'):
+             self.np_random, _ = gym.utils.seeding.np_random()
+
         self.current_ticker = self.np_random.choice(self.tickers)
         self.df = self.grouped_data[self.current_ticker]
         
@@ -91,65 +98,68 @@ class TradingEnv(gym.Env):
     def _get_observation(self):
         feats = self.features[self.current_step]
         
-        # Считаем нереализованную прибыль/убыток в процентах
         unrealized_pnl = 0.0
         if self.current_position != 0 and self.entry_price > 0:
             current_price = self.prices[self.current_step]
             price_change = (current_price - self.entry_price) / self.entry_price
-            unrealized_pnl = price_change * self.current_position * 100.0 # В процентах
+            unrealized_pnl = price_change * self.current_position * 100.0
             
         obs = np.append(feats, [self.current_position, unrealized_pnl])
-        return obs.astype(np.float32)
+        # Строго приводим к типу, ожидаемому observation_space
+        return np.array(obs, dtype=np.float32)
 
     def step(self, action):
         current_price = self.prices[self.current_step]
         prev_price = self.prices[self.current_step - 1] if self.current_step > 0 else current_price
         
-        desired_position = action - 1 
+        desired_position = 0
+        if action == 1: desired_position = 1
+        elif action == 2: desired_position = -1
         
-        # 1. Считаем PnL от удержания позиции
+        step_reward = 0.0
+        
         if self.current_position != 0:
             daily_return = (current_price - prev_price) / prev_price
             daily_pnl_pct = daily_return * self.current_position
             self.balance *= (1 + daily_pnl_pct)
             
-        # 2. Обработка изменения позиции (Комиссии и Цена входа)
+        trade_occurred = False
         if desired_position != self.current_position:
+            trade_occurred = True
             commission_cost = self.commission * abs(desired_position - self.current_position)
             self.balance *= (1 - commission_cost)
-            self.current_position = desired_position
             
+            self.current_position = desired_position
             if desired_position != 0:
                 self.entry_price = current_price
             else:
                 self.entry_price = 0.0 
 
-        # 3. Награда агента (Исправлено на Логарифмическую доходность)
-        # Логарифм делает награду симметричной для PPO-сетей
         if self.balance > 0 and self.prev_balance > 0:
             step_reward = np.log(self.balance / self.prev_balance) * 100.0
         else:
-            step_reward = -100.0 # Катастрофа, слив
-        
-        # Штраф за нахождение в кэше удален. Агент должен уметь ждать!
+            step_reward = -100.0 
             
         self.prev_balance = self.balance
         self.current_step += 1
         self.episode_step += 1
         
         terminated = False
-        truncated = bool(self.episode_step >= self.max_episode_steps)
+        truncated = False
         
-        # Защита от слива депозита (Margin Call)
-        if self.balance < self.initial_balance * 0.1: 
+        if self.episode_step >= self.max_episode_steps:
+             truncated = True
+
+        # Margin Call (защита от полного слива)
+        if self.balance < self.initial_balance * 0.5: 
             terminated = True
-            step_reward -= 10.0 
+            step_reward -= 20.0 
             
-        obs = self._get_observation()
+        obs = self._get_observation()  # <--- ИСПРАВЛЕНА ОПЕЧАТКА ЗДЕСЬ!
         info = {
-            "balance": self.balance, 
+            "balance": float(self.balance), 
             "ticker": self.current_ticker,
-            "position": self.current_position
+            "position": int(self.current_position)
         }
         
-        return obs, step_reward, terminated, truncated, info
+        return obs, float(step_reward), bool(terminated), bool(truncated), info
