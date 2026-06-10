@@ -106,7 +106,11 @@ def main():
             model={"fcnet_hiddens": [256, 256], "fcnet_activation": "relu"}
         )
         .api_stack(enable_rl_module_and_learner=False, enable_env_runner_and_connector_v2=False)
-        .resources(num_gpus=NUM_GPUS, num_gpus_per_learner=NUM_GPUS, num_cpus_per_worker=1)
+        .resources(
+            num_gpus=NUM_GPUS, 
+            num_cpus_per_worker=1,
+            num_gpus_per_worker=0
+        )
         .env_runners(num_env_runners=2)
         .evaluation(
             evaluation_interval=10, 
