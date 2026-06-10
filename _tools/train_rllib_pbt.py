@@ -35,7 +35,7 @@ from ray.rllib.algorithms.ppo import PPOConfig
 from ray.tune.registry import register_env
 from ray.tune import CLIReporter
 
-from _tools.rl_env import TradingEnv
+from _tools.rl_env import PortfolioTradingEnv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 RL_DIR = BASE_DIR / "data" / "processed" / "2000_2026_1d" / "rl_env"
@@ -68,7 +68,7 @@ class TradingStatsCallback(tune.Callback):
             f.write("\n".join(lines))
 
 def env_creator(env_config):
-    return TradingEnv(env_config)
+    return PortfolioTradingEnv(env_config)
 
 register_env("TradingEnv-v0", env_creator)
 
