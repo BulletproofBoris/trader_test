@@ -1,0 +1,20 @@
+{
+    "fold": "fold_2010",
+    "optimal_k": 8,
+    "ensemble_smoothed_loss": 0.8794229243291145,
+    "composition": {
+        "CONV1D+GRU": 5,
+        "CNN": 2,
+        "ATTENTION": 1
+    },
+    "models": [
+        "data/processed/2000_2026_1d_18_3/fold_2010/models/conv1d+gru_loss_0.8892_acc_66.39_run_s_08_235228_c58866.keras",
+        "data/processed/2000_2026_1d_18_3/fold_2010/models/conv1d+gru_loss_0.8954_acc_66.41_run_s_08_235228_658f36.keras",
+        "data/processed/2000_2026_1d_18_3/fold_2010/models/conv1d+gru_loss_0.8964_acc_66.73_run_s_08_235228_40b693.keras",
+        "data/processed/2000_2026_1d_18_3/fold_2010/models/conv1d+gru_loss_0.8970_acc_65.72_run_s_08_235228_40dbce.keras",
+        "data/processed/2000_2026_1d_18_3/fold_2010/models/conv1d+gru_loss_0.8992_acc_65.31_run_s_08_235228_47b87d.keras",
+        "data/processed/2000_2026_1d_18_3/fold_2010/models/cnn_loss_0.9059_acc_66.45_run_s_08_071344_8b0bd8.keras",
+        "data/processed/2000_2026_1d_18_3/fold_2010/models/cnn_loss_0.9087_acc_66.28_run_s_08_071344_7b9350.keras",
+        "data/processed/2000_2026_1d_18_3/fold_2010/models/attention_loss_0.9249_acc_65.39_run_s_09_230321_cf9fae.keras"
+    ]
+}
