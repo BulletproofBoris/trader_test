@@ -118,14 +118,14 @@ class TradingEnv(gym.Env):
         
         step_reward = 0.0
         
+        # --- 1. PnL (Базовая награда) ---
         if self.current_position != 0:
             daily_return = (current_price - prev_price) / prev_price
             daily_pnl_pct = daily_return * self.current_position
             self.balance *= (1 + daily_pnl_pct)
             
-        trade_occurred = False
+        # --- 2. Исполнение сделки ---
         if desired_position != self.current_position:
-            trade_occurred = True
             commission_cost = self.commission * abs(desired_position - self.current_position)
             self.balance *= (1 - commission_cost)
             
@@ -135,10 +135,14 @@ class TradingEnv(gym.Env):
             else:
                 self.entry_price = 0.0 
 
-        if self.balance > 0 and self.prev_balance > 0:
-            step_reward = np.log(self.balance / self.prev_balance) * 100.0
-        else:
-            step_reward = -100.0 
+        # 🛡️ БЕЗОПАСНАЯ ЛОГИКА НАГРАДЫ (ПРЕДОХРАНИТЕЛЬ ОТ NaN)
+        # Гарантируем, что баланс никогда не уйдет в ноль или минус
+        self.balance = max(self.balance, 1.0) 
+        self.prev_balance = max(self.prev_balance, 1.0)
+        
+        # Считаем логарифм безопасно и клипаем (обрезаем) огромные значения
+        raw_log_return = np.log(self.balance / self.prev_balance) * 100.0
+        step_reward = np.clip(raw_log_return, -50.0, 50.0) # Защита от "взрыва" градиентов
             
         self.prev_balance = self.balance
         self.current_step += 1
@@ -155,11 +159,18 @@ class TradingEnv(gym.Env):
             terminated = True
             step_reward -= 20.0 
             
-        obs = self._get_observation()  # <--- ИСПРАВЛЕНА ОПЕЧАТКА ЗДЕСЬ!
+        # Проверяем, не выдала ли среда NaN в стейт
+        obs = self._get_observation()
+        obs = np.nan_to_num(obs, nan=0.0, posinf=1.0, neginf=-1.0)
+        
         info = {
             "balance": float(self.balance), 
             "ticker": self.current_ticker,
             "position": int(self.current_position)
         }
         
+        # Убеждаемся, что награда — это обычное число, а не np.float или NaN
+        if np.isnan(step_reward) or np.isinf(step_reward):
+            step_reward = -10.0
+            
         return obs, float(step_reward), bool(terminated), bool(truncated), info
