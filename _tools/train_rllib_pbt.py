@@ -141,7 +141,7 @@ def main():
         )
         .api_stack(enable_rl_module_and_learner=False, enable_env_runner_and_connector_v2=False)
         .resources(
-            num_gpus=NUM_GPUS, 
+            num_gpus=NUM_GPUS / args.population if NUM_GPUS > 0 else 0, 
             num_cpus_per_worker=1,
             num_gpus_per_worker=0
         )
