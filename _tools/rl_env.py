@@ -17,20 +17,26 @@ class PortfolioTradingEnv(gym.Env):
         sample_df = pd.read_parquet(data_path).head(1)
         all_cols = sample_df.columns.tolist()
         
-        # Выцепляем вероятности ансамблей
+        # Выцепляем вероятности ансамблей (p0=SL, p1=Hold, p2=TP)
         self.prob_cols = [c for c in all_cols if c.endswith('_p0') or c.endswith('_p1') or c.endswith('_p2')]
         
         # Выцепляем глобальный макро-контекст (если он есть в данных)
         potential_macro = ['usdrub_close', 'brent_close', 'sp500_close', 'imoex_close', 'vix_close']
         self.macro_cols = [c for c in potential_macro if c in all_cols]
         
-        core_cols = ['datetime', 'ticker', 'close', 'close_y']
+        # 🌟 ФИКС: Безопасный выбор базовых колонок (защита от IndexError / Missing Column)
+        core_cols = ['datetime', 'ticker']
+        if 'close' in all_cols: 
+            core_cols.append('close')
+        if 'close_y' in all_cols: 
+            core_cols.append('close_y')
         
         # Грузим только то, что нужно агенту (без мусорных сырых фичей)
         columns_to_load = list(set(core_cols + self.prob_cols + self.macro_cols))
         df = pd.read_parquet(data_path, columns=columns_to_load)
         df['datetime'] = pd.to_datetime(df['datetime'])
         
+        # 🌟 ФИКС: Глобальные размерности ДО сплита (защита от mismatch весов нейросети)
         self.tickers = sorted(df['ticker'].unique().tolist())
         self.num_tickers = len(self.tickers)
         self.num_probs = len(self.prob_cols)
@@ -50,13 +56,15 @@ class PortfolioTradingEnv(gym.Env):
         print(f"🧬 [{split_mode.upper()}] Сборка State Space для {self.num_tickers} тикеров...")
         
         # А) Строим матрицу Цен
+        # Если есть обе, 'close_y' приоритетнее (обычно это склеенный таргет), иначе 'close'
         price_col = 'close_y' if 'close_y' in df_filtered.columns else 'close'
         self.price_pivot = df_filtered.pivot(index='datetime', columns='ticker', values=price_col)
-        self.price_pivot = self.price_pivot.reindex(columns=self.tickers).fillna(method='ffill').fillna(method='bfill').fillna(0.0)
+        # Принудительно расширяем матрицу до глобального списка тикеров и заполняем пустоты
+        self.price_pivot = self.price_pivot.reindex(columns=self.tickers).ffill().bfill().fillna(0.0)
         self.unique_dates = self.price_pivot.index.tolist()
         self.prices_matrix = self.price_pivot.values.astype(np.float32)
         
-        # Б) Строим тензор Вероятностей (Мнения ансамблей)
+        # Б) Строим тензор Вероятностей (Мнения ансамблей) - СЖАТО В float16 для защиты от OOM!
         self.probs_tensor = np.zeros((len(self.unique_dates), self.num_tickers, self.num_probs), dtype=np.float16)
         for t_idx, ticker in enumerate(self.tickers):
             if ticker in df_filtered['ticker'].values:
@@ -74,7 +82,7 @@ class PortfolioTradingEnv(gym.Env):
         else:
             self.macro_matrix = np.zeros((len(self.unique_dates), 0), dtype=np.float32)
         
-        # ОЧИСТКА ПАМЯТИ
+        # 🌟 ОЧИСТКА ПАМЯТИ (Защита от OOM)
         del df, df_filtered, self.price_pivot
         gc.collect()
 
@@ -94,6 +102,7 @@ class PortfolioTradingEnv(gym.Env):
         
         self.initial_balance = env_config.get("initial_balance", 100000.0)
         self.commission = env_config.get("commission", 0.0003)
+        # Ограничитель эпизода: либо заданный, либо доступная длина данных
         self.max_episode_steps = min(env_config.get("max_episode_steps", 252), max(1, len(self.unique_dates) - 2))
         
         self.current_step = 0
@@ -101,7 +110,7 @@ class PortfolioTradingEnv(gym.Env):
         self.nav = self.initial_balance
         self.prev_nav = self.initial_balance
         self.current_weights = np.zeros(self.num_tickers + 1, dtype=np.float32)
-        self.current_weights[-1] = 1.0  # Все деньги в кэше
+        self.current_weights[-1] = 1.0  # На старте сидим 100% в кэше
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
@@ -123,7 +132,7 @@ class PortfolioTradingEnv(gym.Env):
         return self._get_observation(), {}
 
     def _get_observation(self):
-        # 1. Прогнозы ансамблей
+        # 1. Прогнозы ансамблей (читаем float16, отдаем нейросети float32)
         probs_features = self.probs_tensor[self.current_step].flatten().astype(np.float32)
         
         # 2. Макро-индикаторы
@@ -131,39 +140,45 @@ class PortfolioTradingEnv(gym.Env):
         
         # 3. Внутренний контекст портфеля
         account_context = np.array([
-            self.nav / self.initial_balance,  # Нормализованный баланс (1.0 = старт, 1.5 = +50% профит)
-            self.episode_step / self.max_episode_steps # Прогресс эпизода (чтобы агент знал, когда пора "закругляться")
+            self.nav / self.initial_balance,           # Нормализованный баланс (1.0 = старт, 1.5 = +50% профит)
+            self.episode_step / self.max_episode_steps # Прогресс эпизода (агент понимает, когда пора фиксировать прибыль)
         ], dtype=np.float32)
         
         obs = np.concatenate([probs_features, macro_features, self.current_weights, account_context])
+        # Жесткая защита от NaN (бывают при пустых датах)
         return np.nan_to_num(obs, nan=0.0).astype(np.float32)
 
     def step(self, action):
-        # Превращаем сырой вектор выхода нейросети в идеальные 100% долей (Softmax)
+        # Превращаем сырой вектор выхода нейросети (Box) в 100% доли (Softmax)
         exp_weights = np.exp(action - np.max(action))
         target_weights = exp_weights / np.sum(exp_weights)
         
         prices_today = self.prices_matrix[self.current_step]
         prices_tomorrow = self.prices_matrix[self.current_step + 1]
         
+        # Защита от деления на ноль для пропавших котировок
         prices_today_safe = np.where(prices_today == 0, 1e-8, prices_today)
         asset_returns = (prices_tomorrow - prices_today_safe) / prices_today_safe
-        portfolio_returns = np.append(asset_returns, 0.0) # Кэш не меняется в цене
+        portfolio_returns = np.append(asset_returns, 0.0) # Кэш не генерирует доходности
         
-        # Комиссия за ребалансировку
+        # Штраф за оборот (комиссия за ребалансировку портфеля)
         weight_changes = np.sum(np.abs(target_weights - self.current_weights))
         transaction_cost = self.nav * weight_changes * self.commission
         self.nav -= transaction_cost
         
-        # Оценка стоимости активов
+        # Переоценка стоимости активов (NAV)
         growth_factor = np.sum(self.current_weights * (1.0 + portfolio_returns))
         self.nav *= growth_factor
         
         self.nav = max(self.nav, 1.0) 
+        
+        # Расчет награды агента: лог-доходность портфеля за один шаг
         raw_reward = np.log(self.nav / self.prev_nav) * 100.0
         step_reward = np.clip(raw_reward, -50.0, 50.0)
         
         self.prev_nav = self.nav
+        
+        # Фактические веса меняются в конце дня из-за неравномерного изменения цен активов
         next_weights_raw = target_weights * (1.0 + portfolio_returns)
         self.current_weights = next_weights_raw / np.sum(next_weights_raw)
         
@@ -173,7 +188,7 @@ class PortfolioTradingEnv(gym.Env):
         terminated = False
         truncated = self.episode_step >= self.max_episode_steps
         
-        # Жесткий Margin Call
+        # Жесткий Margin Call (остановка эпизода при просадке > 50%)
         if self.nav < self.initial_balance * 0.5:
             terminated = True
             step_reward -= 50.0
