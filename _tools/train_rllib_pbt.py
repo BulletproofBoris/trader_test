@@ -145,7 +145,7 @@ def main():
             num_cpus_per_worker=1,
             num_gpus_per_worker=0
         )
-        .env_runners(num_env_runners=2)
+        .env_runners(num_env_runners=1)
         .evaluation(
             evaluation_interval=10, 
             evaluation_duration=5, 

@@ -80,6 +80,11 @@ class PortfolioTradingEnv(gym.Env):
         self.prev_nav = self.initial_balance
         self.current_weights = np.zeros(self.num_tickers + 1, dtype=np.float32)
         self.current_weights[-1] = 1.0  # Кэш
+
+        import gc
+        if hasattr(self, 'df_raw'):
+            del self.df_raw
+        gc.collect()
         
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
