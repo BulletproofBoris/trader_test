@@ -2,6 +2,7 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 import pandas as pd
+import gc
 
 class PortfolioTradingEnv(gym.Env):
     metadata = {"render_modes": ["human"]}
@@ -10,64 +11,85 @@ class PortfolioTradingEnv(gym.Env):
         super(PortfolioTradingEnv, self).__init__()
         
         data_path = env_config.get("data_path", "/home/restorator/trader_test/data/processed/2000_2026_1d/rl_env/environment_data.parquet")
-        df = pd.read_parquet(data_path)
+        
+        # 1. ЧИТАЕМ ДАННЫЕ ОПТИМИЗИРОВАННО
+        print("🧬 [ENV] Чтение данных с диска...")
+        sample_df = pd.read_parquet(data_path).head(1)
+        all_cols = sample_df.columns.tolist()
+        
+        # Выцепляем вероятности ансамблей
+        self.prob_cols = [c for c in all_cols if c.endswith('_p0') or c.endswith('_p1') or c.endswith('_p2')]
+        
+        # Выцепляем глобальный макро-контекст (если он есть в данных)
+        potential_macro = ['usdrub_close', 'brent_close', 'sp500_close', 'imoex_close', 'vix_close']
+        self.macro_cols = [c for c in potential_macro if c in all_cols]
+        
+        core_cols = ['datetime', 'ticker', 'close', 'close_y']
+        
+        # Грузим только то, что нужно агенту (без мусорных сырых фичей)
+        columns_to_load = list(set(core_cols + self.prob_cols + self.macro_cols))
+        df = pd.read_parquet(data_path, columns=columns_to_load)
         df['datetime'] = pd.to_datetime(df['datetime'])
         
-        # 1. СТРОГО ФИКСИРУЕМ РАЗМЕРНОСТИ ПО ВСЕМУ ДАТАСЕТУ (ДО СПЛИТА!)
-        # Это гарантирует, что размер нейросети будет одинаковым для Train и Test
         self.tickers = sorted(df['ticker'].unique().tolist())
         self.num_tickers = len(self.tickers)
+        self.num_probs = len(self.prob_cols)
+        self.num_macro = len(self.macro_cols)
         
-        exclude_cols = ['datetime', 'ticker', 'open', 'high', 'low', 'close', 'close_x', 'close_y', 'volume']
-        self.feature_cols = sorted([col for col in df.columns if col not in exclude_cols])
-        self.num_features = len(self.feature_cols)
-        
-        # 2. ТЕПЕРЬ ДЕЛАЕМ СПЛИТ
+        # --- TRAIN / TEST SPLIT ---
         split_mode = env_config.get("split_mode", "train")
         cutoff_date = pd.to_datetime("2022-01-01") 
         
         if split_mode == "train":
-            self.df_raw = df[df['datetime'] < cutoff_date].copy()
+            df_filtered = df[df['datetime'] < cutoff_date]
         elif split_mode == "test":
-            self.df_raw = df[df['datetime'] >= cutoff_date].copy()
+            df_filtered = df[df['datetime'] >= cutoff_date]
         else:
-            self.df_raw = df.copy()
+            df_filtered = df
 
-        print(f"🧬 [{split_mode.upper()}] Векторизация рынка для {self.num_tickers} глобальных тикеров...")
+        print(f"🧬 [{split_mode.upper()}] Сборка State Space для {self.num_tickers} тикеров...")
         
-        price_col = 'close_y' if 'close_y' in self.df_raw.columns else 'close'
-        
-        # Строим матрицы Цен
-        self.price_pivot = self.df_raw.pivot(index='datetime', columns='ticker', values=price_col)
-        # ГАРАНТИЯ РАЗМЕРНОСТИ: добавляем недостающие тикеры (заполняем нулями), если в этом сплите их нет
+        # А) Строим матрицу Цен
+        price_col = 'close_y' if 'close_y' in df_filtered.columns else 'close'
+        self.price_pivot = df_filtered.pivot(index='datetime', columns='ticker', values=price_col)
         self.price_pivot = self.price_pivot.reindex(columns=self.tickers).fillna(method='ffill').fillna(method='bfill').fillna(0.0)
-        
         self.unique_dates = self.price_pivot.index.tolist()
         self.prices_matrix = self.price_pivot.values.astype(np.float32)
         
-        # Строим 3D-матрицу признаков [Даты × Тикеры × Фичи]
-        self.features_tensor = np.zeros((len(self.unique_dates), self.num_tickers, self.num_features), dtype=np.float32)
-        
+        # Б) Строим тензор Вероятностей (Мнения ансамблей)
+        self.probs_tensor = np.zeros((len(self.unique_dates), self.num_tickers, self.num_probs), dtype=np.float16)
         for t_idx, ticker in enumerate(self.tickers):
-            # Извлекаем данные только если тикер вообще торговался в этот период
-            if ticker in self.df_raw['ticker'].values:
-                ticker_df = self.df_raw[self.df_raw['ticker'] == ticker].set_index('datetime')
-                # Выравниваем фичи по сетке дат
+            if ticker in df_filtered['ticker'].values:
+                ticker_df = df_filtered[df_filtered['ticker'] == ticker].set_index('datetime')
                 ticker_df = ticker_df.reindex(self.unique_dates).fillna(0.0)
-                # Выравниваем колонки (защита от пропавших фичей)
-                ticker_df = ticker_df.reindex(columns=self.feature_cols).fillna(0.0)
-                self.features_tensor[:, t_idx, :] = ticker_df[self.feature_cols].values
-            
+                ticker_df = ticker_df.reindex(columns=self.prob_cols).fillna(0.0)
+                self.probs_tensor[:, t_idx, :] = ticker_df[self.prob_cols].values.astype(np.float16)
+                
+        # В) Строим матрицу Макро-контекста
+        if self.num_macro > 0:
+            # Поскольку макро одинаково для всех тикеров в один день, берем первое попавшееся значение за день
+            macro_df = df_filtered.groupby('datetime')[self.macro_cols].first()
+            macro_df = macro_df.reindex(self.unique_dates).fillna(0.0)
+            self.macro_matrix = macro_df.values.astype(np.float32)
+        else:
+            self.macro_matrix = np.zeros((len(self.unique_dates), 0), dtype=np.float32)
+        
+        # ОЧИСТКА ПАМЯТИ
+        del df, df_filtered, self.price_pivot
+        gc.collect()
+
         # --- НАСТРОЙКА RL-ПРОСТРАНСТВ ---
+        # Действия: Веса (доли) для N тикеров + 1 доля Кэша
         self.action_space = spaces.Box(
             low=0.0, high=1.0, shape=(self.num_tickers + 1,), dtype=np.float32
         )
         
-        self.obs_features_dim = self.num_tickers * self.num_features
-        self.obs_shape = self.obs_features_dim + (self.num_tickers + 1)
+        # Наблюдения: 
+        # (Прогнозы ансамблей) + (Макро-экономика) + (Текущие доли портфеля) + (Баланс и Тайминг)
+        self.obs_dim = (self.num_tickers * self.num_probs) + self.num_macro + (self.num_tickers + 1) + 2
         
         self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(self.obs_shape,), dtype=np.float32
+            low=-np.inf, high=np.inf, shape=(self.obs_dim,), dtype=np.float32
         )
         
         self.initial_balance = env_config.get("initial_balance", 100000.0)
@@ -79,13 +101,8 @@ class PortfolioTradingEnv(gym.Env):
         self.nav = self.initial_balance
         self.prev_nav = self.initial_balance
         self.current_weights = np.zeros(self.num_tickers + 1, dtype=np.float32)
-        self.current_weights[-1] = 1.0  # Кэш
+        self.current_weights[-1] = 1.0  # Все деньги в кэше
 
-        import gc
-        if hasattr(self, 'df_raw'):
-            del self.df_raw
-        gc.collect()
-        
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
         if seed is not None:
@@ -93,7 +110,6 @@ class PortfolioTradingEnv(gym.Env):
         elif not hasattr(self, 'np_random'):
             self.np_random, _ = gym.utils.seeding.np_random()
             
-        # Случайный выбор окна во времени для этого эпизода
         max_start = max(0, len(self.unique_dates) - self.max_episode_steps - 2)
         self.current_step = self.np_random.integers(0, max_start) if max_start > 0 else 0
         
@@ -101,70 +117,63 @@ class PortfolioTradingEnv(gym.Env):
         self.nav = self.initial_balance
         self.prev_nav = self.initial_balance
         
-        # Сброс в 100% кэш
         self.current_weights = np.zeros(self.num_tickers + 1, dtype=np.float32)
         self.current_weights[-1] = 1.0
         
         return self._get_observation(), {}
 
     def _get_observation(self):
-        # Вытаскиваем срез фичей по рынку на сегодня: матрица [Тикеры × Фичи] -> сплющиваем в 1D
-        market_features = self.features_tensor[self.current_step].flatten()
+        # 1. Прогнозы ансамблей
+        probs_features = self.probs_tensor[self.current_step].flatten().astype(np.float32)
         
-        # Приклеиваем текущее распределение портфеля (веса)
-        obs = np.concatenate([market_features, self.current_weights])
+        # 2. Макро-индикаторы
+        macro_features = self.macro_matrix[self.current_step]
+        
+        # 3. Внутренний контекст портфеля
+        account_context = np.array([
+            self.nav / self.initial_balance,  # Нормализованный баланс (1.0 = старт, 1.5 = +50% профит)
+            self.episode_step / self.max_episode_steps # Прогресс эпизода (чтобы агент знал, когда пора "закругляться")
+        ], dtype=np.float32)
+        
+        obs = np.concatenate([probs_features, macro_features, self.current_weights, account_context])
         return np.nan_to_num(obs, nan=0.0).astype(np.float32)
 
     def step(self, action):
-        # 1. Защита и нормализация весов (Softmax), переданных агентом
-        # Чтобы сумма весов была строго равна 1.0 (100% распределение)
+        # Превращаем сырой вектор выхода нейросети в идеальные 100% долей (Softmax)
         exp_weights = np.exp(action - np.max(action))
         target_weights = exp_weights / np.sum(exp_weights)
         
-        # Цены сегодня и завтра
         prices_today = self.prices_matrix[self.current_step]
         prices_tomorrow = self.prices_matrix[self.current_step + 1]
         
-        # Считаем доходность каждого тикера за шаг
-        # Защита от деления на ноль, если цена почему-то пропала
         prices_today_safe = np.where(prices_today == 0, 1e-8, prices_today)
         asset_returns = (prices_tomorrow - prices_today_safe) / prices_today_safe
+        portfolio_returns = np.append(asset_returns, 0.0) # Кэш не меняется в цене
         
-        # Добавляем доходность кэша (она всегда равна 0.0)
-        portfolio_returns = np.append(asset_returns, 0.0)
-        
-        # 2. Расчет издержек на ребалансировку портфеля (Turnover Penalty)
-        # Комиссия берется от объема сделок, необходимых для перехода от текущих весов к целевым
+        # Комиссия за ребалансировку
         weight_changes = np.sum(np.abs(target_weights - self.current_weights))
         transaction_cost = self.nav * weight_changes * self.commission
-        
-        # Вычитаем издержки из нашего фонда
         self.nav -= transaction_cost
         
-        # 3. Переоценка активов фонда за день
-        # Рост/падение фонда — это взвешенная сумма доходностей всех активов
+        # Оценка стоимости активов
         growth_factor = np.sum(self.current_weights * (1.0 + portfolio_returns))
         self.nav *= growth_factor
         
-        # 4. Вычисляем Награду (Логарифмическая доходность фонда за шаг)
-        self.nav = max(self.nav, 1.0)  # Предохранитель от полного слива
+        self.nav = max(self.nav, 1.0) 
         raw_reward = np.log(self.nav / self.prev_nav) * 100.0
         step_reward = np.clip(raw_reward, -50.0, 50.0)
         
-        # Обновляем состояние
         self.prev_nav = self.nav
-        # Фактические веса портфеля меняются в конце дня из-за изменения цен акций
         next_weights_raw = target_weights * (1.0 + portfolio_returns)
         self.current_weights = next_weights_raw / np.sum(next_weights_raw)
         
         self.current_step += 1
         self.episode_step += 1
         
-        # Критерии остановки
         terminated = False
         truncated = self.episode_step >= self.max_episode_steps
         
-        # Если фонд потерял более 50% капитала — принудительный Margin Call
+        # Жесткий Margin Call
         if self.nav < self.initial_balance * 0.5:
             terminated = True
             step_reward -= 50.0
@@ -176,4 +185,7 @@ class PortfolioTradingEnv(gym.Env):
             "cash_weight": float(self.current_weights[-1])
         }
         
+        if np.isnan(step_reward) or np.isinf(step_reward):
+            step_reward = -10.0
+            
         return obs, float(step_reward), bool(terminated), bool(truncated), info
