@@ -3,6 +3,7 @@ import argparse
 import logging
 import warnings
 import sys
+import csv
 import shutil
 from pathlib import Path
 import numpy as np
@@ -40,15 +41,29 @@ from _tools.rl_env import PortfolioTradingEnv
 BASE_DIR = Path(__file__).resolve().parent.parent
 RL_DIR = BASE_DIR / "data" / "processed" / "2000_2026_1d" / "rl_env"
 STATS_FILE = RL_DIR / "training_summary.txt"
+CSV_LOG_FILE = RL_DIR / "training_progress.csv" # Добавляем путь к CSV логу
 
 class TradingStatsCallback(tune.Callback):
+    def __init__(self):
+        super().__init__()
+        # Инициализируем CSV файл и пишем заголовки, если его еще нет
+        if not CSV_LOG_FILE.exists() or args.force:
+            with open(CSV_LOG_FILE, mode='w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(["Timestamp", "Iteration", "Trial_ID", "Status", "Train_Return_Mean", "Test_Return_Mean"])
+
     def on_trial_result(self, iteration, trials, trial, result, **info):
+        # 1. Формируем текстовый вывод для консоли/txt (как было раньше)
         lines = []
         lines.append("="*60)
         lines.append(f"📊 ОБНОВЛЕНИЕ СТАТИСТИКИ (Итерация {result.get('training_iteration', 0)})")
         lines.append("="*60)
         lines.append(f"{'Trial ID':<15} | {'Status':<10} | {'Train Ret %':<12} | {'Test Ret %':<12}")
         lines.append("-" * 60)
+
+        # 2. Собираем данные для записи в CSV
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        csv_data_to_append = []
 
         for t in trials:
             m = t.last_result
@@ -57,15 +72,33 @@ class TradingStatsCallback(tune.Callback):
                 
             train_ret = m.get('env_runners', {}).get('episode_return_mean', 0)
             eval_ret = m.get('evaluation', {}).get('env_runners', {}).get('episode_return_mean', np.nan)
-            eval_str = f"{eval_ret:.2f}" if not np.isnan(eval_ret) else "WAITING..."
             
+            # Строки для TXT
+            eval_str = f"{eval_ret:.2f}" if not np.isnan(eval_ret) else "WAITING..."
             lines.append(f"{t.trial_id:<15} | {t.status:<10} | {train_ret:<12.2f} | {eval_str:<12}")
+            
+            # Строки для CSV
+            csv_data_to_append.append([
+                current_time, 
+                m.get('training_iteration', 0), 
+                t.trial_id, 
+                t.status, 
+                round(train_ret, 4), 
+                round(eval_ret, 4) if not np.isnan(eval_ret) else ""
+            ])
 
         lines.append("\n* Train Ret: Средняя награда (лог-доходность) на обучающей выборке")
         lines.append("* Test Ret:  Средняя награда на экзаменационных данных (2022-2024)")
         
+        # Запись в TXT
         with open(STATS_FILE, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
+            
+        # Запись новых строк в CSV (append mode)
+        if csv_data_to_append:
+            with open(CSV_LOG_FILE, mode='a', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerows(csv_data_to_append)
 
 def env_creator(env_config):
     return PortfolioTradingEnv(env_config)
