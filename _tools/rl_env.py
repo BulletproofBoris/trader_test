@@ -94,7 +94,7 @@ class PortfolioTradingEnv(gym.Env):
         
         # Наблюдения: 
         # (Прогнозы ансамблей) + (Макро-экономика) + (Текущие доли портфеля) + (Баланс и Тайминг)
-        self.obs_dim = (self.num_tickers * self.num_probs) + self.num_macro + (self.num_tickers + 1) + 2
+        self.obs_dim = (self.num_tickers * self.num_probs) + self.num_macro + (self.num_tickers + 1) + 1
         
         self.observation_space = spaces.Box(
             low=-np.inf, high=np.inf, shape=(self.obs_dim,), dtype=np.float32
@@ -132,55 +132,68 @@ class PortfolioTradingEnv(gym.Env):
         return self._get_observation(), {}
 
     def _get_observation(self):
-        # 1. Прогнозы ансамблей (читаем float16, отдаем нейросети float32)
+        # 1. Прогнозы ансамблей
         probs_features = self.probs_tensor[self.current_step].flatten().astype(np.float32)
         
         # 2. Макро-индикаторы
         macro_features = self.macro_matrix[self.current_step]
         
-        # 3. Внутренний контекст портфеля
+        # 3. Внутренний контекст портфеля (УБРАЛ NAV, чтобы агент не зависел от абсолютных цифр)
         account_context = np.array([
-            self.nav / self.initial_balance,           # Нормализованный баланс (1.0 = старт, 1.5 = +50% профит)
-            self.episode_step / self.max_episode_steps # Прогресс эпизода (агент понимает, когда пора фиксировать прибыль)
+            self.episode_step / self.max_episode_steps # Только прогресс эпизода
         ], dtype=np.float32)
         
         obs = np.concatenate([probs_features, macro_features, self.current_weights, account_context])
-        # Жесткая защита от NaN (бывают при пустых датах)
         return np.nan_to_num(obs, nan=0.0).astype(np.float32)
 
     def step(self, action):
-        # Превращаем сырой вектор выхода нейросети (Box) в 100% доли (Softmax)
-        exp_weights = np.exp(action - np.max(action))
+        # 1. SOFTMAX С ИНЕРЦИЕЙ (Sticky Actions)
+        # Агент выдает дельты к текущим весам, а не полностью новые веса с нуля
+        raw_weights = self.current_weights[:-1] + (action[:-1] * 0.1) # Меняем максимум на 10% за шаг
+        raw_cash = self.current_weights[-1] + (action[-1] * 0.1)
+        
+        full_raw = np.append(raw_weights, raw_cash)
+        exp_weights = np.exp(full_raw - np.max(full_raw))
         target_weights = exp_weights / np.sum(exp_weights)
         
         prices_today = self.prices_matrix[self.current_step]
         prices_tomorrow = self.prices_matrix[self.current_step + 1]
         
-        # Защита от деления на ноль для пропавших котировок
-        prices_today_safe = np.where(prices_today == 0, 1e-8, prices_today)
-        asset_returns = (prices_tomorrow - prices_today_safe) / prices_today_safe
-        portfolio_returns = np.append(asset_returns, 0.0) # Кэш не генерирует доходности
+        valid_price_mask = (prices_today > 0) & (prices_tomorrow > 0)
+        asset_returns = np.zeros(self.num_tickers, dtype=np.float32)
+        asset_returns[valid_price_mask] = (prices_tomorrow[valid_price_mask] - prices_today[valid_price_mask]) / prices_today[valid_price_mask]
+        asset_returns = np.clip(asset_returns, -0.99, 10.0) 
         
-        # Штраф за оборот (комиссия за ребалансировку портфеля)
+        portfolio_returns = np.append(asset_returns, 0.0) # Кэш
+        
+        # 2. РАСЧЕТ БЕНЧМАРКА (Среднее по рынку за сегодня)
+        # Допустим, мы вложили бы поровну во все торгующиеся бумаги
+        market_return = np.mean(asset_returns[valid_price_mask]) if np.any(valid_price_mask) else 0.0
+        
+        # Комиссия (заниженная для стадии обучения, чтобы поощрять исследование)
         weight_changes = np.sum(np.abs(target_weights - self.current_weights))
-        transaction_cost = self.nav * weight_changes * self.commission
-        self.nav -= transaction_cost
+        transaction_cost = weight_changes * (self.commission * 0.5) 
         
-        # Переоценка стоимости активов (NAV)
-        growth_factor = np.sum(self.current_weights * (1.0 + portfolio_returns))
-        self.nav *= growth_factor
+        # 3. ДОХОДНОСТЬ И НАГРАДА ЗА АЛЬФУ
+        agent_return = np.sum(self.current_weights * portfolio_returns) - transaction_cost
         
+        # НАГРАДА = Насколько агент обогнал тупой бенчмарк (в базисных пунктах)
+        # Умножаем на 10000 (базисные пункты), чтобы PPO видел хорошие градиенты (например, +5.0 или -3.0)
+        step_reward = (agent_return - market_return) * 10000.0 
+        
+        # Переоценка реального NAV (для графиков)
+        self.nav *= (1.0 + agent_return)
         self.nav = max(self.nav, 1.0) 
         
-        # Расчет награды агента: лог-доходность портфеля за один шаг
-        raw_reward = np.log(self.nav / self.prev_nav) * 100.0
-        step_reward = np.clip(raw_reward, -50.0, 50.0)
-        
         self.prev_nav = self.nav
-        
-        # Фактические веса меняются в конце дня из-за неравномерного изменения цен активов
         next_weights_raw = target_weights * (1.0 + portfolio_returns)
-        self.current_weights = next_weights_raw / np.sum(next_weights_raw)
+        
+        weight_sum = np.sum(next_weights_raw)
+        if weight_sum > 0:
+            self.current_weights = next_weights_raw / weight_sum
+        else:
+            self.current_weights = np.zeros_like(next_weights_raw)
+            self.current_weights[-1] = 1.0 
         
         self.current_step += 1
         self.episode_step += 1
@@ -188,16 +201,17 @@ class PortfolioTradingEnv(gym.Env):
         terminated = False
         truncated = self.episode_step >= self.max_episode_steps
         
-        # Жесткий Margin Call (остановка эпизода при просадке > 50%)
         if self.nav < self.initial_balance * 0.5:
             terminated = True
-            step_reward -= 50.0
+            step_reward -= 500.0 # Сильный штраф за Margin Call
             
         obs = self._get_observation()
         info = {
             "balance": float(self.nav),
             "date": str(self.unique_dates[self.current_step]),
-            "cash_weight": float(self.current_weights[-1])
+            "cash_weight": float(self.current_weights[-1]),
+            "agent_return": float(agent_return),
+            "market_return": float(market_return)
         }
         
         if np.isnan(step_reward) or np.isinf(step_reward):
