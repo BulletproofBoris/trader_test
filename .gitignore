@@ -168,6 +168,7 @@ worker_swarm_*.txt
 !data/processed/2000_2026_1d/rl_env/training_summary.txt
 !evaluation_report.html
 
-# Явно разрешаем сохранять веса моделей (.pkl) внутри чекпоинтов,
-# даже если выше в файле они глобально игнорируются (*.pkl)
-!data/processed/2000_2026_1d/rl_env/ray_results/**/*.pkl
+# Явно разрешаем сохранять веса моделей (.pkl) внутри папки git_checkpoints
+!data/processed/2000_2026_1d/rl_env/git_checkpoints/
+!data/processed/2000_2026_1d/rl_env/git_checkpoints/**
+!data/processed/2000_2026_1d/rl_env/git_checkpoints/**/*.pkl
