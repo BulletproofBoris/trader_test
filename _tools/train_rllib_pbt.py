@@ -27,7 +27,8 @@ else:
     print("🎮 РЕЖИМ GPU: Использование видеокарты разрешено.")
 
 os.environ["RAY_DEDUP_LOGS"] = "0"
-os.environ["TUNE_DISABLE_AUTO_CALLBACK_LOGGERS"] = "1"
+# Включаем автоматическое логирование для TensorBoard (удаляем флаг "1")
+os.environ["TUNE_DISABLE_AUTO_CALLBACK_LOGGERS"] = "0"
 warnings.filterwarnings("ignore")
 
 import ray
