@@ -24,7 +24,7 @@ class PortfolioTradingEnv(gym.Env):
         potential_macro = ['usdrub_close', 'brent_close', 'sp500_close', 'imoex_close', 'vix_close']
         self.macro_cols = [c for c in potential_macro if c in all_cols]
         
-        # 🌟 ФИКС: Безопасный выбор базовых колонок (защита от IndexError / Missing Column)
+        # Безопасный выбор базовых колонок
         core_cols = ['datetime', 'ticker']
         if 'close' in all_cols: 
             core_cols.append('close')
@@ -36,7 +36,7 @@ class PortfolioTradingEnv(gym.Env):
         df = pd.read_parquet(data_path, columns=columns_to_load)
         df['datetime'] = pd.to_datetime(df['datetime'])
         
-        # 🌟 ФИКС: Глобальные размерности ДО сплита (защита от mismatch весов нейросети)
+        # Глобальные размерности ДО сплита (защита от mismatch весов нейросети)
         self.tickers = sorted(df['ticker'].unique().tolist())
         self.num_tickers = len(self.tickers)
         self.num_probs = len(self.prob_cols)
@@ -56,10 +56,8 @@ class PortfolioTradingEnv(gym.Env):
         print(f"🧬 [{split_mode.upper()}] Сборка State Space для {self.num_tickers} тикеров...")
         
         # А) Строим матрицу Цен
-        # Если есть обе, 'close_y' приоритетнее (обычно это склеенный таргет), иначе 'close'
         price_col = 'close_y' if 'close_y' in df_filtered.columns else 'close'
         self.price_pivot = df_filtered.pivot(index='datetime', columns='ticker', values=price_col)
-        # Принудительно расширяем матрицу до глобального списка тикеров и заполняем пустоты
         self.price_pivot = self.price_pivot.reindex(columns=self.tickers).ffill().bfill().fillna(0.0)
         self.unique_dates = self.price_pivot.index.tolist()
         self.prices_matrix = self.price_pivot.values.astype(np.float32)
@@ -75,25 +73,23 @@ class PortfolioTradingEnv(gym.Env):
                 
         # В) Строим матрицу Макро-контекста
         if self.num_macro > 0:
-            # Поскольку макро одинаково для всех тикеров в один день, берем первое попавшееся значение за день
             macro_df = df_filtered.groupby('datetime')[self.macro_cols].first()
             macro_df = macro_df.reindex(self.unique_dates).fillna(0.0)
             self.macro_matrix = macro_df.values.astype(np.float32)
         else:
             self.macro_matrix = np.zeros((len(self.unique_dates), 0), dtype=np.float32)
         
-        # 🌟 ОЧИСТКА ПАМЯТИ (Защита от OOM)
+        # ОЧИСТКА ПАМЯТИ (Защита от OOM)
         del df, df_filtered, self.price_pivot
         gc.collect()
 
         # --- НАСТРОЙКА RL-ПРОСТРАНСТВ ---
-        # Действия: Веса (доли) для N тикеров + 1 доля Кэша
+        # Действия: Сырые сигналы для N тикеров + 1 доля Кэша (будут возводиться в 4-ю степень)
         self.action_space = spaces.Box(
             low=0.0, high=1.0, shape=(self.num_tickers + 1,), dtype=np.float32
         )
         
-        # Наблюдения: 
-        # (Прогнозы ансамблей) + (Макро-экономика) + (Текущие доли портфеля) + (Баланс и Тайминг)
+        # Наблюдения: (Прогнозы) + (Макро) + (Текущие доли портфеля) + (Только Тайминг)
         self.obs_dim = (self.num_tickers * self.num_probs) + self.num_macro + (self.num_tickers + 1) + 1
         
         self.observation_space = spaces.Box(
@@ -115,7 +111,6 @@ class PortfolioTradingEnv(gym.Env):
             self.max_episode_steps = min(env_config.get("max_episode_steps", 252), max(1, len(self.unique_dates) - 2))
         
         self.current_step = 0
-
         self.episode_step = 0
         self.nav = self.initial_balance
         self.prev_nav = self.initial_balance
@@ -167,14 +162,24 @@ class PortfolioTradingEnv(gym.Env):
         return obs.astype(np.float32)
 
     def step(self, action):
-        # 1. SOFTMAX С ИНЕРЦИЕЙ (Sticky Actions)
-        # Агент выдает дельты к текущим весам, а не полностью новые веса с нуля
-        raw_weights = self.current_weights[:-1] + (action[:-1] * 0.1) # Меняем максимум на 10% за шаг
-        raw_cash = self.current_weights[-1] + (action[-1] * 0.1)
+        # 1. ТЕМПЕРАТУРНЫЙ SOFTMAX (Вместо агрессивного x^4)
+        # T = 0.15 дает отличный баланс: позволяет концентрировать до 30-40% в одной акции, 
+        # но сохраняет диверсификацию и не ломает градиенты нейросети.
+        T = 0.15 
         
-        full_raw = np.append(raw_weights, raw_cash)
-        exp_weights = np.exp(full_raw - np.max(full_raw))
-        target_weights = exp_weights / np.sum(exp_weights)
+        # Защита: отсекаем возможные выбросы нейросети за пределы [0, 1]
+        clipped_action = np.clip(action, 0.0, 1.0)
+        
+        # Масштабируем сигнал
+        scaled_action = clipped_action / T
+        
+        # Применяем стабильный Softmax
+        exp_weights = np.exp(scaled_action - np.max(scaled_action))
+        desired_weights = exp_weights / np.sum(exp_weights)
+        
+        # 2. ИНЕРЦИЯ ПОРТФЕЛЯ (Смягчение комиссий)
+        target_weights = (self.current_weights * 0.8) + (desired_weights * 0.2)
+        target_weights = target_weights / np.sum(target_weights)
         
         prices_today = self.prices_matrix[self.current_step]
         prices_tomorrow = self.prices_matrix[self.current_step + 1]
@@ -184,26 +189,28 @@ class PortfolioTradingEnv(gym.Env):
         asset_returns[valid_price_mask] = (prices_tomorrow[valid_price_mask] - prices_today[valid_price_mask]) / prices_today[valid_price_mask]
         asset_returns = np.clip(asset_returns, -0.99, 10.0) 
         
-        portfolio_returns = np.append(asset_returns, 0.0) # Кэш
+        portfolio_returns = np.append(asset_returns, 0.0) # Кэш не генерирует доходность
         
-        # 2. РАСЧЕТ БЕНЧМАРКА (Среднее по рынку за сегодня)
-        # Допустим, мы вложили бы поровну во все торгующиеся бумаги
+        # 3. РАСЧЕТ БЕНЧМАРКА (Среднее по рынку за сегодня)
         market_return = np.mean(asset_returns[valid_price_mask]) if np.any(valid_price_mask) else 0.0
         
-        # Комиссия (заниженная для стадии обучения, чтобы поощрять исследование)
+        # 4. Комиссия
         weight_changes = np.sum(np.abs(target_weights - self.current_weights))
         transaction_cost = weight_changes * (self.commission * 0.5) 
         
-        # 3. ДОХОДНОСТЬ И НАГРАДА ЗА АЛЬФУ
+        # 5. ДОХОДНОСТЬ И НАГРАДА
         agent_return = np.sum(self.current_weights * portfolio_returns) - transaction_cost
         
-        # НАГРАДА = Насколько агент обогнал тупой бенчмарк (в базисных пунктах)
-        # Умножаем на 10000 (базисные пункты), чтобы PPO видел хорошие градиенты (например, +5.0 или -3.0)
+        # Базовая награда: Насколько агент обогнал бенчмарк (в базисных пунктах)
         step_reward = (agent_return - market_return) * 10000.0 
         
-        # В фазе 1 штрафуем за удержание кэша, чтобы заставить агента доверять ансамблям и торговать
-        if self.task_phase == 1 and self.current_weights[-1] > 0.5:
+        # В фазе 1 штрафуем за удержание кэша, чтобы заставить агента торговать
+        if self.task_phase == 1 and self.current_weights[-1] > 0.3:
             step_reward -= (self.current_weights[-1] * 5.0)
+            
+        # В фазе 3 (реальный рынок): Поощряем агента, если он отсиживается в кэше во время падения рынка!
+        if self.task_phase >= 3 and market_return < 0 and self.current_weights[-1] > 0.5:
+            step_reward += 20.0
             
         self.returns_history.append(agent_return)
         
@@ -240,7 +247,6 @@ class PortfolioTradingEnv(gym.Env):
 
         obs = self._get_observation()
         
-        # Вычисление простого Sharpe
         returns_arr = np.array(self.returns_history)
         sharpe = 0.0
         if len(returns_arr) > 5 and np.std(returns_arr) > 0:
