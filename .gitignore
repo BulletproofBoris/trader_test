@@ -157,3 +157,9 @@ filelist.txt
 organizer.py
 worker_swarm_*.txt
 *:Zone.Identifier
+
+# --- RL Training Results (PBT) ---
+ray_results/
+training_progress.csv
+training_summary.txt
+evaluation_report.html
