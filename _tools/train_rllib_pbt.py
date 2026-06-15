@@ -13,10 +13,11 @@ import numpy as np
 parser = argparse.ArgumentParser()
 parser.add_argument('--iterations', type=int, default=500) 
 parser.add_argument('--population', type=int, default=4)
-TOTAL_ITERATIONS = args.iterations
+# TOTAL_ITERATIONS will be set after parsing args
 parser.add_argument('--force', action='store_true', help='Принудительно начать обучение с нуля')
 parser.add_argument('--cpu', action='store_true', help='Отключить GPU и учить только на CPU')
 args = parser.parse_args()
+TOTAL_ITERATIONS = args.iterations
 
 # 2. Управление ресурсами
 if args.cpu:
