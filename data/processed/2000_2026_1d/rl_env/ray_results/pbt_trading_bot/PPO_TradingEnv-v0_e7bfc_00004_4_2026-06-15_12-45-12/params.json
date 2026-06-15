@@ -73,7 +73,7 @@
   "enable_env_runner_and_connector_v2": false,
   "enable_rl_module_and_learner": false,
   "enable_tf1_exec_eagerly": false,
-  "entropy_coeff": 0.030632517784612158,
+  "entropy_coeff": 0.027178993768013412,
   "entropy_coeff_schedule": null,
   "env": "TradingEnv-v0",
   "env_config": {
@@ -363,7 +363,7 @@
   "validate_env_runners_after_construction": true,
   "validate_offline_eval_runners_after_construction": true,
   "vf_clip_param": 10.0,
-  "vf_loss_coeff": 0.8983208491923914,
+  "vf_loss_coeff": 0.8,
   "vf_share_layers": -1,
   "worker_cls": -1
 }
