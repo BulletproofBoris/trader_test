@@ -131,16 +131,23 @@ class CustomMetricsCallback(DefaultCallbacks):
         if iteration > 250:
             phase = 3
             
-        # Рассылаем новую фазу во все окружения воркеров
-        algorithm.workers.foreach_worker(
-            lambda worker: setattr(worker.env, 'task_phase', phase) if hasattr(worker, 'env') and worker.env else None
-        )
+        # Безопасная рассылка новой фазы (зависит от версии Ray)
+        env_group = getattr(algorithm, "env_runner_group", getattr(algorithm, "workers", None))
         
+        if callable(env_group):
+            env_group = env_group() # Если это метод
+            
+        if env_group is not None:
+            env_group.foreach_env(lambda env: setattr(env, 'task_phase', phase))
+            
         # Также обновляем фазу в evaluation воркерах
-        if hasattr(algorithm, "evaluation_workers") and algorithm.evaluation_workers is not None:
-            algorithm.evaluation_workers.foreach_worker(
-                lambda worker: setattr(worker.env, 'task_phase', phase) if hasattr(worker, 'env') and worker.env else None
-            )
+        eval_group = getattr(algorithm, "eval_env_runner_group", getattr(algorithm, "evaluation_workers", None))
+        
+        if callable(eval_group):
+            eval_group = eval_group()
+            
+        if eval_group is not None:
+            eval_group.foreach_env(lambda env: setattr(env, 'task_phase', phase))
 
 def env_creator(env_config):
     return PortfolioTradingEnv(env_config)

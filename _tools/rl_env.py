@@ -162,7 +162,9 @@ class PortfolioTradingEnv(gym.Env):
         ], dtype=np.float32)
         
         obs = np.concatenate([probs_features, macro_features, self.current_weights, account_context])
-        return np.nan_to_num(obs, nan=0.0).astype(np.float32)
+        obs = np.nan_to_num(obs, nan=0.0, posinf=0.0, neginf=0.0)
+        obs = np.clip(obs, -10.0, 10.0)
+        return obs.astype(np.float32)
 
     def step(self, action):
         # 1. SOFTMAX С ИНЕРЦИЕЙ (Sticky Actions)
