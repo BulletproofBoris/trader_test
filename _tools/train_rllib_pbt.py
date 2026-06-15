@@ -13,6 +13,7 @@ import numpy as np
 parser = argparse.ArgumentParser()
 parser.add_argument('--iterations', type=int, default=500) 
 parser.add_argument('--population', type=int, default=4)
+TOTAL_ITERATIONS = args.iterations
 parser.add_argument('--force', action='store_true', help='Принудительно начать обучение с нуля')
 parser.add_argument('--cpu', action='store_true', help='Отключить GPU и учить только на CPU')
 args = parser.parse_args()
@@ -129,9 +130,9 @@ class CustomMetricsCallback(DefaultCallbacks):
         # Определяем фазу (Curriculum Learning)
         phase = 1
         # Transition to phase 2 after 1/5 of total iterations, phase 3 after 1/2
-        if iteration > args.iterations / 5:
+        if iteration > TOTAL_ITERATIONS / 5:
             phase = 2
-        if iteration > args.iterations / 2:
+        if iteration > TOTAL_ITERATIONS / 2:
             phase = 3
             
         # Безопасная рассылка новой фазы (зависит от версии Ray)
