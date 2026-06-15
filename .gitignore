@@ -159,7 +159,15 @@ worker_swarm_*.txt
 *:Zone.Identifier
 
 # --- RL Training Results (PBT) ---
-ray_results/
-training_progress.csv
-training_summary.txt
-evaluation_report.html
+# Разрешаем Git индексировать папку ray_results и нужные логи
+!data/processed/2000_2026_1d/
+!data/processed/2000_2026_1d/rl_env/
+!data/processed/2000_2026_1d/rl_env/ray_results/
+!data/processed/2000_2026_1d/rl_env/ray_results/**
+!data/processed/2000_2026_1d/rl_env/training_progress.csv
+!data/processed/2000_2026_1d/rl_env/training_summary.txt
+!evaluation_report.html
+
+# Явно разрешаем сохранять веса моделей (.pkl) внутри чекпоинтов,
+# даже если выше в файле они глобально игнорируются (*.pkl)
+!data/processed/2000_2026_1d/rl_env/ray_results/**/*.pkl
