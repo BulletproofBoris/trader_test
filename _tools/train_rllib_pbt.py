@@ -240,7 +240,8 @@ def main():
             storage_path=str(RL_DIR / "ray_results"),
             checkpoint_config=CheckpointConfig(
                 checkpoint_score_attribute="env_runners/episode_return_mean",
-                checkpoint_score_order="max"
+                checkpoint_score_order="max",
+                checkpoint_frequency=1
             ),
             callbacks=[TradingStatsCallback()], 
             progress_reporter=reporter, 
