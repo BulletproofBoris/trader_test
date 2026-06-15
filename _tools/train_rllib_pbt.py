@@ -126,10 +126,12 @@ class CustomMetricsCallback(DefaultCallbacks):
         iteration = result["training_iteration"]
         
         # Определяем фазу (Curriculum Learning)
+        # Определяем фазу (Curriculum Learning)
         phase = 1
-        if iteration > 100:
+        # Transition to phase 2 after 1/5 of total iterations, phase 3 after 1/2
+        if iteration > args.iterations / 5:
             phase = 2
-        if iteration > 250:
+        if iteration > args.iterations / 2:
             phase = 3
             
         # Безопасная рассылка новой фазы (зависит от версии Ray)
