@@ -36,6 +36,7 @@ from ray.tune.schedulers import PopulationBasedTraining
 from ray.rllib.algorithms.ppo import PPOConfig
 from ray.tune.registry import register_env
 from ray.tune import CLIReporter
+from ray.rllib.algorithms.callbacks import DefaultCallbacks
 
 from _tools.rl_env import PortfolioTradingEnv
 
@@ -51,7 +52,7 @@ class TradingStatsCallback(tune.Callback):
         if not CSV_LOG_FILE.exists() or args.force:
             with open(CSV_LOG_FILE, mode='w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
-                writer.writerow(["Timestamp", "Iteration", "Trial_ID", "Status", "Train_Return_Mean", "Test_Return_Mean"])
+                writer.writerow(["Timestamp", "Iteration", "Phase", "Trial_ID", "Status", "Train_Return", "Test_Return", "Train_Sharpe"])
 
     def on_trial_result(self, iteration, trials, trial, result, **info):
         # 1. Формируем текстовый вывод для консоли/txt (как было раньше)
@@ -59,7 +60,7 @@ class TradingStatsCallback(tune.Callback):
         lines.append("="*60)
         lines.append(f"📊 ОБНОВЛЕНИЕ СТАТИСТИКИ (Итерация {result.get('training_iteration', 0)})")
         lines.append("="*60)
-        lines.append(f"{'Trial ID':<15} | {'Status':<10} | {'Train Ret %':<12} | {'Test Ret %':<12}")
+        lines.append(f"{'Trial ID':<15} | {'Phase':<5} | {'Train Ret %':<12} | {'Test Ret %':<12} | {'Sharpe':<8}")
         lines.append("-" * 60)
 
         # 2. Собираем данные для записи в CSV
@@ -74,18 +75,25 @@ class TradingStatsCallback(tune.Callback):
             train_ret = m.get('env_runners', {}).get('episode_return_mean', 0)
             eval_ret = m.get('evaluation', {}).get('env_runners', {}).get('episode_return_mean', np.nan)
             
+            # Извлекаем кастомные метрики (Sharpe)
+            custom_metrics = m.get('custom_metrics', {})
+            train_sharpe = custom_metrics.get('sharpe_mean', 0.0)
+            current_phase = custom_metrics.get('task_phase_mean', 1.0)
+            
             # Строки для TXT
-            eval_str = f"{eval_ret:.2f}" if not np.isnan(eval_ret) else "WAITING..."
-            lines.append(f"{t.trial_id:<15} | {t.status:<10} | {train_ret:<12.2f} | {eval_str:<12}")
+            eval_str = f"{eval_ret:.2f}" if not np.isnan(eval_ret) else "WAITING"
+            lines.append(f"{t.trial_id:<15} | {int(current_phase):<5} | {train_ret:<12.2f} | {eval_str:<12} | {train_sharpe:<8.2f}")
             
             # Строки для CSV
             csv_data_to_append.append([
                 current_time, 
                 m.get('training_iteration', 0), 
+                int(current_phase),
                 t.trial_id, 
                 t.status, 
                 round(train_ret, 4), 
-                round(eval_ret, 4) if not np.isnan(eval_ret) else ""
+                round(eval_ret, 4) if not np.isnan(eval_ret) else "",
+                round(train_sharpe, 4)
             ])
 
         lines.append("\n* Train Ret: Средняя награда (лог-доходность) на обучающей выборке")
@@ -100,6 +108,39 @@ class TradingStatsCallback(tune.Callback):
             with open(CSV_LOG_FILE, mode='a', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
                 writer.writerows(csv_data_to_append)
+
+# --- НОВЫЙ КАЛБЭК: Отслеживание метрик и Curriculum Learning ---
+class CustomMetricsCallback(DefaultCallbacks):
+    def on_episode_end(self, *, worker, base_env, policies, episode, env_index, **kwargs):
+        info = episode.last_info_for()
+        if info:
+            if "sharpe" in info:
+                episode.custom_metrics["sharpe"] = info["sharpe"]
+            if "drawdown" in info:
+                episode.custom_metrics["drawdown"] = info["drawdown"]
+            # Логируем фазу, чтобы видеть её на графиках
+            episode.custom_metrics["task_phase"] = getattr(worker.env, "task_phase", 1)
+
+    def on_train_result(self, *, algorithm, result, **kwargs):
+        iteration = result["training_iteration"]
+        
+        # Определяем фазу (Curriculum Learning)
+        phase = 1
+        if iteration > 100:
+            phase = 2
+        if iteration > 250:
+            phase = 3
+            
+        # Рассылаем новую фазу во все окружения воркеров
+        algorithm.workers.foreach_worker(
+            lambda worker: setattr(worker.env, 'task_phase', phase) if hasattr(worker, 'env') and worker.env else None
+        )
+        
+        # Также обновляем фазу в evaluation воркерах
+        if hasattr(algorithm, "evaluation_workers") and algorithm.evaluation_workers is not None:
+            algorithm.evaluation_workers.foreach_worker(
+                lambda worker: setattr(worker.env, 'task_phase', phase) if hasattr(worker, 'env') and worker.env else None
+            )
 
 def env_creator(env_config):
     return PortfolioTradingEnv(env_config)
@@ -139,6 +180,7 @@ def main():
             train_batch_size=4096, 
             model={"fcnet_hiddens": [256, 256], "fcnet_activation": "relu"}
         )
+        .callbacks(CustomMetricsCallback)
         .api_stack(enable_rl_module_and_learner=False, enable_env_runner_and_connector_v2=False)
         .resources(
             num_gpus=NUM_GPUS / args.population if NUM_GPUS > 0 else 0, 
@@ -158,7 +200,9 @@ def main():
         perturbation_interval=30, 
         resample_probability=0.25,
         hyperparam_mutations={
-            "lr": tune.loguniform(1e-5, 5e-4) 
+            "lr": tune.loguniform(1e-5, 5e-4),
+            "entropy_coeff": tune.uniform(0.0, 0.05),
+            "vf_loss_coeff": tune.uniform(0.1, 1.0)
         }
     )
 
