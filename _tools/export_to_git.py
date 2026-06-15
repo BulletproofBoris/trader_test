@@ -7,7 +7,7 @@ def main():
     BASE_DIR = Path(__file__).resolve().parent.parent
     RL_DIR = BASE_DIR / "data" / "processed" / "2000_2026_1d" / "rl_env"
     EXPERIMENT_DIR = RL_DIR / "ray_results" / "pbt_trading_bot"
-    GIT_EXPORT_DIR = RL_DIR / "git_checkpoints"
+    GIT_EXPORT_DIR = RL_DIR / "champions"
 
     if not EXPERIMENT_DIR.exists():
         print(f"❌ Директория с результатами обучения не найдена: {EXPERIMENT_DIR}")
