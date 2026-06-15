@@ -73,7 +73,7 @@
   "enable_env_runner_and_connector_v2": false,
   "enable_rl_module_and_learner": false,
   "enable_tf1_exec_eagerly": false,
-  "entropy_coeff": 0.04166164043915354,
+  "entropy_coeff": 0.0,
   "entropy_coeff_schedule": null,
   "env": "TradingEnv-v0",
   "env_config": {
@@ -150,7 +150,7 @@
   "log_gradients": false,
   "log_level": "ERROR",
   "log_sys_usage": true,
-  "lr": 9.34702474395709e-05,
+  "lr": 0.0004157320321255698,
   "lr_schedule": null,
   "map_batches_kwargs": {},
   "materialize_data": false,
@@ -363,7 +363,7 @@
   "validate_env_runners_after_construction": true,
   "validate_offline_eval_runners_after_construction": true,
   "vf_clip_param": 10.0,
-  "vf_loss_coeff": 0.5695528835054727,
+  "vf_loss_coeff": 0.15931852726382328,
   "vf_share_layers": -1,
   "worker_cls": -1
 }
