@@ -13,7 +13,7 @@ def main():
         print(f"❌ Директория с результатами не найдена: {EXPERIMENT_DIR}")
         return
 
-    print("🔍 Поиск лучшего чекпоинта через прямой разбор метаданных Ray Tune...")
+    print("🔍 Поиск лучшего чекпоинта через разбор OOS метаданных Ray Tune...")
     
     best_score = -float('inf')
     best_checkpoint_dir = None
@@ -28,39 +28,44 @@ def main():
         if not result_file.exists(): 
             continue
         
-        # Читаем последнюю строчку файла результатов (финальное состояние воркера)
-        last_result = None
+        # Читаем ВСЕ строки файла результатов для поиска пика на OOS
         try:
             with open(result_file, 'r', encoding='utf-8') as f:
                 for line in f:
-                    if line.strip():
-                        last_result = json.loads(line)
-        except Exception:
+                    if not line.strip():
+                        continue
+                    
+                    record = json.loads(line)
+                    
+                    # Извлекаем метрику ИЗ ТЕСТОВОЙ ВЫБОРКИ (Evaluation)
+                    eval_metrics = record.get('evaluation', {}).get('env_runners', {})
+                    score = eval_metrics.get('episode_return_mean', -float('inf'))
+                    
+                    # Если нашли новый абсолютный рекорд
+                    if score > best_score:
+                        iteration = record.get('training_iteration', 0)
+                        # Формируем имя целевой папки
+                        target_checkpoint_name = f"checkpoint_{iteration:06d}"
+                        target_checkpoint_dir = trial_dir / target_checkpoint_name
+                        
+                        # Сохраняем лидера только если папка реально существует
+                        if target_checkpoint_dir.exists():
+                            best_score = score
+                            best_checkpoint_dir = target_checkpoint_dir
+                            best_metrics = record
+        except Exception as e:
+            print(f"⚠️ Ошибка чтения {result_file}: {e}")
             continue
-            
-        if not last_result: 
-            continue
-            
-        # Извлекаем метрику доходности
-        score = last_result.get('env_runners', {}).get('episode_return_mean', -float('inf'))
-        
-        # Находим глобального лидера всей популяции
-        if score > best_score:
-            checkpoints = sorted(list(trial_dir.glob("checkpoint_*")), key=lambda x: x.name)
-            if checkpoints:
-                best_score = score
-                best_checkpoint_dir = checkpoints[-1] # Берем самый свежий чекпоинт лидера
-                best_metrics = last_result
 
     if not best_checkpoint_dir:
         print("⚠️ Валидные чекпоинты не найдены. Возможно, обучение завершилось до первого сохранения.")
         return
 
     print("\n" + "="*60)
-    print(f"🏆 НАЙДЕН АБСОЛЮТНЫЙ ЧЕМПИОН ПОПУЛЯЦИИ!")
+    print(f"🏆 НАЙДЕН АБСОЛЮТНЫЙ ЧЕМПИОН ПОПУЛЯЦИИ (OOS)!")
     print(f"  Trial ID: {best_checkpoint_dir.parent.name}")
     print(f"  Checkpoint: {best_checkpoint_dir.name}")
-    print(f"  Средняя альфа-доходность (Return Mean): {best_score:.2f} б.п.")
+    print(f"  Средняя альфа-доходность (Test Return): {best_score:.2f} б.п.")
     print("="*60)
     
     # Регенерация папки чемпионов для Git

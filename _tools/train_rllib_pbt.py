@@ -9,24 +9,20 @@ import shutil
 from pathlib import Path
 import numpy as np
 
-# =====================================================================
-# НАСТРОЙКИ СИСТЕМЫ И ПАМЯТИ (ЗАЩИТА ОТ OOM)
-# =====================================================================
-os.environ["RAY_DEDUP_LOGS"] = "0"
-os.environ["TUNE_DISABLE_AUTO_CALLBACK_LOGGERS"] = "0"
-
-# 🌟 ФИКС 1: Запрещаем PyTorch жадно резервировать видеопамять
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-warnings.filterwarnings("ignore")
-
+# 1. Парсим аргументы ДО инициализации тяжелых библиотек
 parser = argparse.ArgumentParser()
 parser.add_argument('--iterations', type=int, default=500) 
 parser.add_argument('--population', type=int, default=4)
 parser.add_argument('--force', action='store_true', help='Принудительно начать обучение с нуля')
 parser.add_argument('--cpu', action='store_true', help='Отключить GPU и учить только на CPU')
-args = parser.parse_args()
-TOTAL_ITERATIONS = args.iterations
 
+# Динамические пороги фаз обучения (Curriculum Learning)
+parser.add_argument('--phase2_ratio', type=float, default=0.2, help='Доля итераций до включения Фазы 2')
+parser.add_argument('--phase3_ratio', type=float, default=0.5, help='Доля итераций до включения Фазы 3')
+
+args = parser.parse_args()
+
+# 2. Управление ресурсами
 if args.cpu:
     os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
     NUM_GPUS = 0
@@ -35,6 +31,10 @@ else:
     NUM_GPUS = 1  
     print("🎮 РЕЖИМ GPU: Использование видеокарты разрешено.")
 
+os.environ["RAY_DEDUP_LOGS"] = "0"
+os.environ["TUNE_DISABLE_AUTO_CALLBACK_LOGGERS"] = "0"
+warnings.filterwarnings("ignore")
+
 import ray
 from ray import tune
 from ray.tune.schedulers import PopulationBasedTraining
@@ -42,7 +42,6 @@ from ray.rllib.algorithms.ppo import PPOConfig
 from ray.tune.registry import register_env
 from ray.tune import CLIReporter
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
-from ray.train import CheckpointConfig
 
 from _tools.rl_env import PortfolioTradingEnv
 
@@ -96,7 +95,7 @@ class TradingStatsCallback(tune.Callback):
                 round(train_sharpe, 4)
             ])
 
-        lines.append("\n* Train Ret: Альфа-доходность портфеля (обгон бенчмарка в б.п.)")
+        lines.append("\n* Train Ret: Средняя награда (лог-доходность) на обучающей выборке")
         lines.append("* Test Ret:  Средняя награда на экзаменационных данных (2022-2024)")
         
         with open(STATS_FILE, "w", encoding="utf-8") as f:
@@ -121,12 +120,13 @@ class CustomMetricsCallback(DefaultCallbacks):
         iteration = result["training_iteration"]
         
         phase = 1
-        if iteration > TOTAL_ITERATIONS / 5:
+        if iteration >= args.iterations * args.phase2_ratio:
             phase = 2
-        if iteration > TOTAL_ITERATIONS / 2:
+        if iteration >= args.iterations * args.phase3_ratio:
             phase = 3
             
         env_group = getattr(algorithm, "env_runner_group", getattr(algorithm, "workers", None))
+        
         if callable(env_group):
             env_group = env_group() 
             
@@ -134,6 +134,7 @@ class CustomMetricsCallback(DefaultCallbacks):
             env_group.foreach_env(lambda env: setattr(env, 'task_phase', phase))
             
         eval_group = getattr(algorithm, "eval_env_runner_group", getattr(algorithm, "evaluation_workers", None))
+        
         if callable(eval_group):
             eval_group = eval_group()
             
@@ -166,13 +167,7 @@ def main():
         "max_episode_steps": 252
     }
     
-    # 🌟 ФИКС 2: Жестко ограничиваем разделяемую память (Object Store)
-    ray.init(
-        ignore_reinit_error=True, 
-        logging_level=logging.ERROR, 
-        num_gpus=NUM_GPUS,
-        object_store_memory=2 * 1024 * 1024 * 1024  # 2 GB
-    )
+    ray.init(ignore_reinit_error=True, logging_level=logging.ERROR, num_gpus=NUM_GPUS)
 
     config = (
         PPOConfig()
@@ -182,8 +177,7 @@ def main():
         .training(
             lr=1e-4,
             train_batch_size=4096, 
-            # 🌟 ФИКС: Делаем "мозг" агента намного мощнее для обработки 63 активов и макро!
-            model={"fcnet_hiddens": [512, 512, 256], "fcnet_activation": "gelu"}
+            model={"fcnet_hiddens": [512, 512, 256], "fcnet_activation": "relu"}
         )
         .callbacks(CustomMetricsCallback)
         .api_stack(enable_rl_module_and_learner=False, enable_env_runner_and_connector_v2=False)
@@ -192,11 +186,7 @@ def main():
             num_cpus_per_worker=1,
             num_gpus_per_worker=0
         )
-        # 🌟 ФИКС 3: Запрещаем дублировать среду на главном узле
-        .env_runners(
-            num_env_runners=1,
-            create_env_on_local_worker=False
-        )
+        .env_runners(num_env_runners=1)
         .evaluation(
             evaluation_interval=10, 
             evaluation_duration=5, 
@@ -204,14 +194,17 @@ def main():
         )
     )
 
+    ### НОВОЕ: Расширенные мутации для PBT (включая Горизонт Планирования - gamma)
     pbt = PopulationBasedTraining(
         time_attr="training_iteration",
         perturbation_interval=30, 
         resample_probability=0.25,
         hyperparam_mutations={
-            "lr": tune.loguniform(1e-5, 5e-4),
-            "entropy_coeff": tune.uniform(0.0, 0.05),
-            "vf_loss_coeff": tune.uniform(0.1, 1.0)
+            "lr": tune.loguniform(1e-5, 1e-3),
+            "entropy_coeff": tune.uniform(0.0, 0.1),
+            "vf_loss_coeff": tune.uniform(0.1, 1.0),
+            "gamma": tune.uniform(0.90, 0.999),  # Эволюция горизонта
+            "lambda": tune.uniform(0.85, 1.0)    # Эволюция оценки GAE
         }
     )
 
@@ -220,10 +213,12 @@ def main():
         max_progress_rows=1,
         print_intermediate_tables=False
     )
+
+    from ray.train import CheckpointConfig
     
-    # 🌟 ФИКС 4: Взлом CheckpointConfig (Ray V2 Bug)
+    ### ИЗМЕНЕНО: num_to_keep=None для отключения сборщика мусора Ray
     ckpt_config = CheckpointConfig(
-        num_to_keep=3,
+        num_to_keep=None, 
         checkpoint_score_attribute="env_runners/episode_return_mean",
         checkpoint_score_order="max"
     )
@@ -261,7 +256,7 @@ def main():
 
     if can_fit:
         try:
-            print("⏳ Обучение запущено. Открой файл training_progress.csv для просмотра метрик.")
+            print("⏳ Обучение запущено. Открой файл training_summary.txt для просмотра метрик.")
             tuner.fit()
         except KeyboardInterrupt:
             print("\n🛑 Остановка по Ctrl+C...")

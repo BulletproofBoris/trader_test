@@ -62,7 +62,7 @@ class PortfolioTradingEnv(gym.Env):
         self.unique_dates = self.price_pivot.index.tolist()
         self.prices_matrix = self.price_pivot.values.astype(np.float32)
         
-        # Б) Строим тензор Вероятностей (Мнения ансамблей) - СЖАТО В float16 для защиты от OOM!
+        # Б) Строим тензор Вероятностей (Мнения ансамблей)
         self.probs_tensor = np.zeros((len(self.unique_dates), self.num_tickers, self.num_probs), dtype=np.float16)
         for t_idx, ticker in enumerate(self.tickers):
             if ticker in df_filtered['ticker'].values:
@@ -79,21 +79,22 @@ class PortfolioTradingEnv(gym.Env):
         else:
             self.macro_matrix = np.zeros((len(self.unique_dates), 0), dtype=np.float32)
         
-        # ОЧИСТКА ПАМЯТИ (Защита от OOM)
+        # ОЧИСТКА ПАМЯТИ
         del df, df_filtered, self.price_pivot
         gc.collect()
 
         # --- НАСТРОЙКА RL-ПРОСТРАНСТВ ---
-        # Действия: Сырые сигналы для N тикеров + 1 доля Кэша (будут возводиться в 4-ю степень)
+        
+        ### ИЗМЕНЕНО: Action Space теперь от -1.0 до 1.0. Даем агенту зону "строгого отказа" от актива.
         self.action_space = spaces.Box(
-            low=0.0, high=1.0, shape=(self.num_tickers + 1,), dtype=np.float32
+            low=-1.0, high=1.0, shape=(self.num_tickers + 1,), dtype=np.float32
         )
         
-        # Наблюдения: (Прогнозы) + (Макро) + (Текущие доли портфеля) + (Только Тайминг)
-        self.obs_dim = (self.num_tickers * self.num_probs) + self.num_macro + (self.num_tickers + 1) + 1
+        ### ИЗМЕНЕНО: Добавлены 2 доп. слота для account_context (drawdown и task_phase)
+        self.obs_dim = (self.num_tickers * self.num_probs) + self.num_macro + (self.num_tickers + 1) + 3
         
         self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(self.obs_dim,), dtype=np.float32
+            low=-1.0e5, high=1.0e5, shape=(self.obs_dim,), dtype=np.float32 # Расширил границы для безопасности
         )
         
         self.initial_balance = env_config.get("initial_balance", 100000.0)
@@ -114,6 +115,7 @@ class PortfolioTradingEnv(gym.Env):
         self.episode_step = 0
         self.nav = self.initial_balance
         self.prev_nav = self.initial_balance
+        self.peak_nav = self.initial_balance
         self.current_weights = np.zeros(self.num_tickers + 1, dtype=np.float32)
         self.current_weights[-1] = 1.0  # На старте сидим 100% в кэше
 
@@ -145,15 +147,20 @@ class PortfolioTradingEnv(gym.Env):
         # 1. Прогнозы ансамблей
         probs_features = self.probs_tensor[self.current_step].flatten().astype(np.float32)
         
-        # 2. Макро-индикаторы (Нормализованные относительно старта эпизода)
+        # 2. Макро-индикаторы
         if self.num_macro > 0:
             macro_features = (self.macro_matrix[self.current_step] - self.macro_start) / (np.abs(self.macro_start) + 1e-9)
         else:
             macro_features = np.array([], dtype=np.float32)
         
-        # 3. Внутренний контекст портфеля (УБРАЛ NAV, чтобы агент не зависел от абсолютных цифр)
+        ### НОВОЕ: Расчет текущей просадки для передачи агенту
+        current_drawdown = (self.peak_nav - self.nav) / self.peak_nav if self.peak_nav > 0 else 0.0
+        
+        ### ИЗМЕНЕНО: Обогащенный внутренний контекст
         account_context = np.array([
-            self.episode_step / self.max_episode_steps # Только прогресс эпизода
+            self.episode_step / self.max_episode_steps,
+            current_drawdown,             # Агент "чувствует" просадку
+            float(self.task_phase) / 3.0  # Агент понимает суровость текущей фазы
         ], dtype=np.float32)
         
         obs = np.concatenate([probs_features, macro_features, self.current_weights, account_context])
@@ -162,24 +169,24 @@ class PortfolioTradingEnv(gym.Env):
         return obs.astype(np.float32)
 
     def step(self, action):
-        # 1. ТЕМПЕРАТУРНЫЙ SOFTMAX (Вместо агрессивного x^4)
-        # T = 0.15 дает отличный баланс: позволяет концентрировать до 30-40% в одной акции, 
-        # но сохраняет диверсификацию и не ломает градиенты нейросети.
-        T = 0.15 
+        ### НОВОЕ: ЕСТЕСТВЕННАЯ КОМПОНОВКА ПОРТФЕЛЯ (Без Softmax)
+        # Всё, что меньше 0 — агент осознанно обнуляет.
+        raw_weights = np.clip(action, 0.0, 1.0)
         
-        # Защита: отсекаем возможные выбросы нейросети за пределы [0, 1]
-        clipped_action = np.clip(action, 0.0, 1.0)
+        weight_sum = np.sum(raw_weights)
+        if weight_sum > 0:
+            desired_weights = raw_weights / weight_sum
+        else:
+            # Если всё в минусе (паника) -> уходим в 100% кэш
+            desired_weights = np.zeros_like(raw_weights)
+            desired_weights[-1] = 1.0
         
-        # Масштабируем сигнал
-        scaled_action = clipped_action / T
-        
-        # Применяем стабильный Softmax
-        exp_weights = np.exp(scaled_action - np.max(scaled_action))
-        desired_weights = exp_weights / np.sum(exp_weights)
-        
-        # 2. ИНЕРЦИЯ ПОРТФЕЛЯ (Смягчение комиссий)
+        # 2. ИНЕРЦИЯ ПОРТФЕЛЯ (Смягчение шоковых транзакций)
         target_weights = (self.current_weights * 0.8) + (desired_weights * 0.2)
         target_weights = target_weights / np.sum(target_weights)
+        
+        ### НОВОЕ: Считаем оборот портфеля (Turnover) для штрафов за суету
+        turnover = np.sum(np.abs(desired_weights - self.current_weights))
         
         prices_today = self.prices_matrix[self.current_step]
         prices_tomorrow = self.prices_matrix[self.current_step + 1]
@@ -201,20 +208,30 @@ class PortfolioTradingEnv(gym.Env):
         # 5. ДОХОДНОСТЬ И НАГРАДА
         agent_return = np.sum(self.current_weights * portfolio_returns) - transaction_cost
         
-        # Базовая награда: Насколько агент обогнал бенчмарк (в базисных пунктах)
-        step_reward = (agent_return - market_return) * 10000.0 
+        ### НОВОЕ: Асимметричный Reward Shaping
+        alpha = agent_return - market_return
         
-        # В фазе 1 штрафуем за удержание кэша, чтобы заставить агента торговать
+        if market_return < 0 and agent_return < 0:
+            # Двойной штраф за падение вместе с рынком (учим защищать капитал)
+            step_reward = alpha * 200.0  
+        else:
+            step_reward = alpha * 100.0
+        
+        # Штраф за сидение в кэше на фазе 1 (прогрев)
         if self.task_phase == 1 and self.current_weights[-1] > 0.3:
-            step_reward -= (self.current_weights[-1] * 5.0)
+            step_reward -= (self.current_weights[-1] * 0.5) 
             
-        # В фазе 3 (реальный рынок): Поощряем агента, если он отсиживается в кэше во время падения рынка!
-        if self.task_phase >= 3 and market_return < 0 and self.current_weights[-1] > 0.5:
-            step_reward += 20.0
+        ### ИЗМЕНЕНО: Поощряем сидение в кэше, если рынок падает (пропорционально падению)
+        if self.task_phase >= 3 and market_return < 0:
+            step_reward += (self.current_weights[-1] * abs(market_return) * 200.0)
+            
+        ### НОВОЕ: Штраф за "суету" (излишний оборот)
+        if self.task_phase >= 3:
+            step_reward -= (turnover * 0.5)
             
         self.returns_history.append(agent_return)
         
-        # Переоценка реального NAV (для графиков)
+        # Переоценка реального NAV
         self.nav *= (1.0 + agent_return)
         self.nav = max(self.nav, 1.0) 
         
@@ -236,14 +253,16 @@ class PortfolioTradingEnv(gym.Env):
         
         if self.nav < self.initial_balance * 0.5:
             terminated = True
-            step_reward -= 500.0 # Сильный штраф за Margin Call
+            step_reward -= 50.0 # Штраф за Margin Call
             
         self.peak_nav = max(self.peak_nav, self.nav)
         drawdown = (self.peak_nav - self.nav) / self.peak_nav if self.peak_nav > 0 else 0.0
         
-        # Штраф за Drawdown в фазе 3
         if self.task_phase >= 3 and drawdown > 0.1:
-            step_reward -= (drawdown * 100.0)
+            step_reward -= (drawdown * 10.0) # Штраф за просадку
+
+        # Финальный клиппинг аномальных наград
+        step_reward = float(np.clip(step_reward, -100.0, 100.0))
 
         obs = self._get_observation()
         
@@ -251,10 +270,12 @@ class PortfolioTradingEnv(gym.Env):
         sharpe = 0.0
         if len(returns_arr) > 5 and np.std(returns_arr) > 0:
             sharpe = float(np.mean(returns_arr) / np.std(returns_arr) * np.sqrt(252))
-            
+        
+        safe_date_idx = min(self.current_step, len(self.unique_dates) - 1)
+        
         info = {
             "balance": float(self.nav),
-            "date": str(self.unique_dates[self.current_step]),
+            "date": str(self.unique_dates[safe_date_idx]),
             "cash_weight": float(self.current_weights[-1]),
             "agent_return": float(agent_return),
             "market_return": float(market_return),
@@ -263,6 +284,6 @@ class PortfolioTradingEnv(gym.Env):
         }
         
         if np.isnan(step_reward) or np.isinf(step_reward):
-            step_reward = -10.0
+            step_reward = -1.0
             
         return obs, float(step_reward), bool(terminated), bool(truncated), info
