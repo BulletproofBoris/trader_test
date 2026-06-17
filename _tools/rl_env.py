@@ -213,7 +213,7 @@ class PortfolioTradingEnv(gym.Env):
         
         if market_return < 0 and agent_return < 0:
             # Двойной штраф за падение вместе с рынком (учим защищать капитал)
-            step_reward = alpha * 200.0  
+            step_reward = alpha * 150.0  
         else:
             step_reward = alpha * 100.0
         
@@ -227,7 +227,7 @@ class PortfolioTradingEnv(gym.Env):
             
         ### НОВОЕ: Штраф за "суету" (излишний оборот)
         if self.task_phase >= 3:
-            step_reward -= (turnover * 0.5)
+            step_reward -= (turnover * 0.05)
             
         self.returns_history.append(agent_return)
         
@@ -259,7 +259,7 @@ class PortfolioTradingEnv(gym.Env):
         drawdown = (self.peak_nav - self.nav) / self.peak_nav if self.peak_nav > 0 else 0.0
         
         if self.task_phase >= 3 and drawdown > 0.1:
-            step_reward -= (drawdown * 10.0) # Штраф за просадку
+            step_reward -= (drawdown * 2.0) # Штраф за просадку
 
         # Финальный клиппинг аномальных наград
         step_reward = float(np.clip(step_reward, -100.0, 100.0))

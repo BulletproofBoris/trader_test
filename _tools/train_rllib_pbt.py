@@ -4,6 +4,7 @@ import logging
 import warnings
 import sys
 import csv
+import json
 from datetime import datetime
 import shutil
 from pathlib import Path
@@ -15,6 +16,9 @@ parser.add_argument('--iterations', type=int, default=500)
 parser.add_argument('--population', type=int, default=4)
 parser.add_argument('--force', action='store_true', help='Принудительно начать обучение с нуля')
 parser.add_argument('--cpu', action='store_true', help='Отключить GPU и учить только на CPU')
+
+# 🌟 НОВОЕ: Принудительный старт с нужной фазы
+parser.add_argument('--start_phase', type=int, default=0, help='Принудительно начать с фазы (1, 2 или 3). 0 = авто.')
 
 # Динамические пороги фаз обучения (Curriculum Learning)
 parser.add_argument('--phase2_ratio', type=float, default=0.2, help='Доля итераций до включения Фазы 2')
@@ -42,6 +46,7 @@ from ray.rllib.algorithms.ppo import PPOConfig
 from ray.tune.registry import register_env
 from ray.tune import CLIReporter
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
+from ray.train import CheckpointConfig
 
 from _tools.rl_env import PortfolioTradingEnv
 
@@ -107,6 +112,33 @@ class TradingStatsCallback(tune.Callback):
                 writer.writerows(csv_data_to_append)
 
 class CustomMetricsCallback(DefaultCallbacks):
+    def __init__(self):
+        super().__init__()
+        # Загружаем список здоровых чекпоинтов
+        self.healthy_checkpoints = []
+        json_path = RL_DIR / "healthy_checkpoints.json"
+        if json_path.exists():
+            with open(json_path, 'r', encoding='utf-8') as f:
+                self.healthy_checkpoints = json.load(f)
+        
+        # Глобальный счетчик, чтобы раздавать разные чекпоинты разным воркерам
+        self.worker_init_counter = 0
+
+    def on_algorithm_init(self, *, algorithm, **kwargs):
+        # Если это старт с нуля и у нас есть список чекпоинтов
+        if algorithm.iteration == 0 and self.healthy_checkpoints:
+            try:
+                # Берем чекпоинт по кругу для каждого нового агента в популяции
+                ckpt_index = self.worker_init_counter % len(self.healthy_checkpoints)
+                target_checkpoint = self.healthy_checkpoints[ckpt_index]
+                
+                algorithm.restore(target_checkpoint)
+                print(f"🧬 [Warm Start] Агент получил мозг из: {Path(target_checkpoint).parent.name[-15:]} / {Path(target_checkpoint).name}")
+                
+                self.worker_init_counter += 1
+            except Exception as e:
+                print(f"⚠️ Ошибка Warm Start: {e}")
+
     def on_episode_end(self, *, worker, base_env, policies, episode, env_index, **kwargs):
         info = episode.last_info_for()
         if info:
@@ -119,14 +151,17 @@ class CustomMetricsCallback(DefaultCallbacks):
     def on_train_result(self, *, algorithm, result, **kwargs):
         iteration = result["training_iteration"]
         
-        phase = 1
-        if iteration >= args.iterations * args.phase2_ratio:
-            phase = 2
-        if iteration >= args.iterations * args.phase3_ratio:
-            phase = 3
+        # 🌟 НОВОЕ: Логика принудительной фазы
+        if args.start_phase > 0:
+            phase = args.start_phase
+        else:
+            phase = 1
+            if iteration >= args.iterations * args.phase2_ratio:
+                phase = 2
+            if iteration >= args.iterations * args.phase3_ratio:
+                phase = 3
             
         env_group = getattr(algorithm, "env_runner_group", getattr(algorithm, "workers", None))
-        
         if callable(env_group):
             env_group = env_group() 
             
@@ -134,7 +169,6 @@ class CustomMetricsCallback(DefaultCallbacks):
             env_group.foreach_env(lambda env: setattr(env, 'task_phase', phase))
             
         eval_group = getattr(algorithm, "eval_env_runner_group", getattr(algorithm, "evaluation_workers", None))
-        
         if callable(eval_group):
             eval_group = eval_group()
             
@@ -213,8 +247,6 @@ def main():
         max_progress_rows=1,
         print_intermediate_tables=False
     )
-
-    from ray.train import CheckpointConfig
     
     ### ИЗМЕНЕНО: num_to_keep=None для отключения сборщика мусора Ray
     ckpt_config = CheckpointConfig(
