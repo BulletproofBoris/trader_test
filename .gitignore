@@ -158,15 +158,4 @@ organizer.py
 worker_swarm_*.txt
 *:Zone.Identifier
 
-# --- RL Training Results (PBT) ---
-# Разрешаем Git индексировать ray_results (TensorBoard логи, метрики, JSON)
-!data/processed/2000_2026_1d/
-!data/processed/2000_2026_1d/rl_env/
-!data/processed/2000_2026_1d/rl_env/ray_results/
-!data/processed/2000_2026_1d/rl_env/ray_results/**
-!data/processed/2000_2026_1d/rl_env/training_progress.csv
-!data/processed/2000_2026_1d/rl_env/training_summary.txt
-!evaluation_report.html
-
-# Явно запрещаем сохранять веса моделей (.pkl) внутри папки git_checkpoints
-data/processed/2000_2026_1d/*
+data/processed/2000_2026_1d/rl_env/

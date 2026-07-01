@@ -1,7 +1,7 @@
 import os
+import json
 import shutil
 from pathlib import Path
-from ray import tune
 
 def main():
     BASE_DIR = Path(__file__).resolve().parent.parent
@@ -10,60 +10,83 @@ def main():
     GIT_EXPORT_DIR = RL_DIR / "champions"
 
     if not EXPERIMENT_DIR.exists():
-        print(f"❌ Директория с результатами обучения не найдена: {EXPERIMENT_DIR}")
+        print(f"❌ Директория с результатами не найдена: {EXPERIMENT_DIR}")
         return
 
-    print("🔍 Сканирование всех агентов в популяции для поиска лучшего чекпоинта...")
-    try:
-        tuner = tune.Tuner.restore(str(EXPERIMENT_DIR))
-        result_grid = tuner.get_results()
-        
-        # Находим лучший результат по всем воркерам (кто заработал больше всего денег)
-        best_result = result_grid.get_best_result(
-            metric="env_runners/episode_return_mean", 
-            mode="max"
-        )
-        
-        best_checkpoint = best_result.checkpoint
-        
-        if best_checkpoint is None:
-            print("⚠️ Чекпоинты не найдены. Вы прервали обучение до первого сохранения?")
-            return
-            
-        checkpoint_path = best_checkpoint.path
-        score = best_result.metrics.get("env_runners/episode_return_mean", 0)
-        sharpe = best_result.metrics.get("custom_metrics", {}).get("sharpe_mean", 0)
-        
-        print(f"🏆 Найден ЛУЧШИЙ чекпоинт!")
-        print(f"   Средняя награда (Доходность): {score:.2f}")
-        print(f"   Коэффициент Шарпа: {sharpe:.2f}")
-        print(f"   Путь: {checkpoint_path}")
+    print("🔍 Поиск лучшего чекпоинта через разбор OOS метаданных Ray Tune...")
+    
+    best_score = -float('inf')
+    best_checkpoint_dir = None
+    best_metrics = {}
 
-        # Создаем папку для экспорта (чистим старую)
-        if GIT_EXPORT_DIR.exists():
-            shutil.rmtree(GIT_EXPORT_DIR)
-        os.makedirs(GIT_EXPORT_DIR, exist_ok=True)
+    # Напрямую сканируем папки триалов PPO_*
+    for trial_dir in EXPERIMENT_DIR.glob("PPO_*"):
+        if not trial_dir.is_dir(): 
+            continue
         
-        # Копируем чекпоинт
-        dest_checkpoint = GIT_EXPORT_DIR / "best_model"
-        shutil.copytree(checkpoint_path, dest_checkpoint)
-        print(f"✅ Чекпоинт скопирован в: {dest_checkpoint}")
+        result_file = trial_dir / "result.json"
+        if not result_file.exists(): 
+            continue
         
-        # Копируем логи
-        csv_log = RL_DIR / "training_progress.csv"
-        if csv_log.exists():
-            shutil.copy(csv_log, GIT_EXPORT_DIR / "training_progress.csv")
-            print("✅ CSV лог скопирован.")
-            
-        html_report = BASE_DIR / "evaluation_report.html"
-        if html_report.exists():
-            shutil.copy(html_report, GIT_EXPORT_DIR / "evaluation_report.html")
-            print("✅ HTML отчет скопирован.")
-            
-        print("\n🎉 Экспорт успешно завершен! Теперь вы можете безопасно сделать git commit.")
+        # Читаем ВСЕ строки файла результатов для поиска пика на OOS
+        try:
+            with open(result_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    
+                    record = json.loads(line)
+                    
+                    # Извлекаем метрику ИЗ ТЕСТОВОЙ ВЫБОРКИ (Evaluation)
+                    eval_metrics = record.get('evaluation', {}).get('env_runners', {})
+                    score = eval_metrics.get('episode_return_mean', -float('inf'))
+                    
+                    # Если нашли новый абсолютный рекорд
+                    if score > best_score:
+                        iteration = record.get('training_iteration', 0)
+                        # Формируем имя целевой папки
+                        target_checkpoint_name = f"checkpoint_{iteration:06d}"
+                        target_checkpoint_dir = trial_dir / target_checkpoint_name
+                        
+                        # Сохраняем лидера только если папка реально существует
+                        if target_checkpoint_dir.exists():
+                            best_score = score
+                            best_checkpoint_dir = target_checkpoint_dir
+                            best_metrics = record
+        except Exception as e:
+            print(f"⚠️ Ошибка чтения {result_file}: {e}")
+            continue
 
-    except Exception as e:
-        print(f"❌ Произошла ошибка при экспорте: {e}")
+    if not best_checkpoint_dir:
+        print("⚠️ Валидные чекпоинты не найдены. Возможно, обучение завершилось до первого сохранения.")
+        return
+
+    print("\n" + "="*60)
+    print(f"🏆 НАЙДЕН АБСОЛЮТНЫЙ ЧЕМПИОН ПОПУЛЯЦИИ (OOS)!")
+    print(f"  Trial ID: {best_checkpoint_dir.parent.name}")
+    print(f"  Checkpoint: {best_checkpoint_dir.name}")
+    print(f"  Средняя альфа-доходность (Test Return): {best_score:.2f} б.п.")
+    print("="*60)
+    
+    # Регенерация папки чемпионов для Git
+    if GIT_EXPORT_DIR.exists():
+        shutil.rmtree(GIT_EXPORT_DIR)
+    os.makedirs(GIT_EXPORT_DIR, exist_ok=True)
+    
+    # Копируем мозг лучшего агента
+    shutil.copytree(best_checkpoint_dir, GIT_EXPORT_DIR / "best_model")
+    print(f"✅ Чекпоинт скопирован в: {GIT_EXPORT_DIR / 'best_model'}")
+    
+    # Экспортируем файлы прогресса и бэктестов, если они есть
+    for src_file, dst_name in [
+        (RL_DIR / "training_progress.csv", "training_progress.csv"),
+        (BASE_DIR / "evaluation_report.html", "evaluation_report.html")
+    ]:
+        if src_file.exists():
+            shutil.copy(src_file, GIT_EXPORT_DIR / dst_name)
+            print(f"✅ Файл {dst_name} успешно перенесен в champions.")
+            
+    print("\n🎉 Автономный экспорт успешно завершен!")
 
 if __name__ == "__main__":
     main()

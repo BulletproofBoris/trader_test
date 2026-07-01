@@ -4,6 +4,7 @@ import logging
 import warnings
 import sys
 import csv
+import json
 from datetime import datetime
 import shutil
 from pathlib import Path
@@ -25,8 +26,15 @@ parser.add_argument('--iterations', type=int, default=500)
 parser.add_argument('--population', type=int, default=4)
 parser.add_argument('--force', action='store_true', help='Принудительно начать обучение с нуля')
 parser.add_argument('--cpu', action='store_true', help='Отключить GPU и учить только на CPU')
+
+# 🌟 НОВОЕ: Принудительный старт с нужной фазы
+parser.add_argument('--start_phase', type=int, default=0, help='Принудительно начать с фазы (1, 2 или 3). 0 = авто.')
+
+# Динамические пороги фаз обучения (Curriculum Learning)
+parser.add_argument('--phase2_ratio', type=float, default=0.2, help='Доля итераций до включения Фазы 2')
+parser.add_argument('--phase3_ratio', type=float, default=0.5, help='Доля итераций до включения Фазы 3')
+
 args = parser.parse_args()
-TOTAL_ITERATIONS = args.iterations
 
 # 2. Управление ресурсами
 if args.cpu:
@@ -34,9 +42,16 @@ if args.cpu:
     NUM_GPUS = 0
     print("🖥️ РЕЖИМ CPU: Видеокарты принудительно отключены.")
 else:
-    NUM_GPUS = 1  # Если у тебя RTX 5070
+    NUM_GPUS = 1  
     print("🎮 РЕЖИМ GPU: Использование видеокарты разрешено.")
 
+<<<<<<< HEAD
+=======
+os.environ["RAY_DEDUP_LOGS"] = "0"
+os.environ["TUNE_DISABLE_AUTO_CALLBACK_LOGGERS"] = "0"
+warnings.filterwarnings("ignore")
+
+>>>>>>> 05fafbd63bd96d6993470e37f67dbd76d7f4b212
 import ray
 from ray import tune
 from ray.tune.schedulers import PopulationBasedTraining
@@ -57,7 +72,6 @@ CSV_LOG_FILE = RL_DIR / "training_progress.csv"
 class TradingStatsCallback(tune.Callback):
     def __init__(self):
         super().__init__()
-        # Инициализируем CSV файл и пишем заголовки, если его еще нет
         if not CSV_LOG_FILE.exists() or args.force:
             with open(CSV_LOG_FILE, mode='w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
@@ -82,16 +96,13 @@ class TradingStatsCallback(tune.Callback):
             train_ret = m.get('env_runners', {}).get('episode_return_mean', 0)
             eval_ret = m.get('evaluation', {}).get('env_runners', {}).get('episode_return_mean', np.nan)
             
-            # Извлекаем кастомные метрики (Sharpe)
             custom_metrics = m.get('custom_metrics', {})
             train_sharpe = custom_metrics.get('sharpe_mean', 0.0)
             current_phase = custom_metrics.get('task_phase_mean', 1.0)
             
-            # Строки для TXT
             eval_str = f"{eval_ret:.2f}" if not np.isnan(eval_ret) else "WAITING"
             lines.append(f"{t.trial_id:<15} | {int(current_phase):<5} | {train_ret:<12.2f} | {eval_str:<12} | {train_sharpe:<8.2f}")
             
-            # Строки для CSV
             csv_data_to_append.append([
                 current_time, 
                 m.get('training_iteration', 0), 
@@ -114,8 +125,38 @@ class TradingStatsCallback(tune.Callback):
                 writer = csv.writer(f)
                 writer.writerows(csv_data_to_append)
 
+<<<<<<< HEAD
 # --- КАЛБЭК: Отслеживание метрик и Curriculum Learning ---
+=======
+>>>>>>> 05fafbd63bd96d6993470e37f67dbd76d7f4b212
 class CustomMetricsCallback(DefaultCallbacks):
+    def __init__(self):
+        super().__init__()
+        # Загружаем список здоровых чекпоинтов
+        self.healthy_checkpoints = []
+        json_path = RL_DIR / "healthy_checkpoints.json"
+        if json_path.exists():
+            with open(json_path, 'r', encoding='utf-8') as f:
+                self.healthy_checkpoints = json.load(f)
+        
+        # Глобальный счетчик, чтобы раздавать разные чекпоинты разным воркерам
+        self.worker_init_counter = 0
+
+    def on_algorithm_init(self, *, algorithm, **kwargs):
+        # Если это старт с нуля и у нас есть список чекпоинтов
+        if algorithm.iteration == 0 and self.healthy_checkpoints:
+            try:
+                # Берем чекпоинт по кругу для каждого нового агента в популяции
+                ckpt_index = self.worker_init_counter % len(self.healthy_checkpoints)
+                target_checkpoint = self.healthy_checkpoints[ckpt_index]
+                
+                algorithm.restore(target_checkpoint)
+                print(f"🧬 [Warm Start] Агент получил мозг из: {Path(target_checkpoint).parent.name[-15:]} / {Path(target_checkpoint).name}")
+                
+                self.worker_init_counter += 1
+            except Exception as e:
+                print(f"⚠️ Ошибка Warm Start: {e}")
+
     def on_episode_end(self, *, worker, base_env, policies, episode, env_index, **kwargs):
         info = episode.last_info_for()
         if info:
@@ -128,6 +169,7 @@ class CustomMetricsCallback(DefaultCallbacks):
     def on_train_result(self, *, algorithm, result, **kwargs):
         iteration = result["training_iteration"]
         
+<<<<<<< HEAD
         # Определяем фазу (Curriculum Learning)
         phase = 1
         if iteration > TOTAL_ITERATIONS / 5:
@@ -136,6 +178,18 @@ class CustomMetricsCallback(DefaultCallbacks):
             phase = 3
             
         # Безопасная рассылка новой фазы
+=======
+        # 🌟 НОВОЕ: Логика принудительной фазы
+        if args.start_phase > 0:
+            phase = args.start_phase
+        else:
+            phase = 1
+            if iteration >= args.iterations * args.phase2_ratio:
+                phase = 2
+            if iteration >= args.iterations * args.phase3_ratio:
+                phase = 3
+            
+>>>>>>> 05fafbd63bd96d6993470e37f67dbd76d7f4b212
         env_group = getattr(algorithm, "env_runner_group", getattr(algorithm, "workers", None))
         if callable(env_group):
             env_group = env_group() 
@@ -143,7 +197,6 @@ class CustomMetricsCallback(DefaultCallbacks):
         if env_group is not None:
             env_group.foreach_env(lambda env: setattr(env, 'task_phase', phase))
             
-        # Также обновляем фазу в evaluation воркерах
         eval_group = getattr(algorithm, "eval_env_runner_group", getattr(algorithm, "evaluation_workers", None))
         if callable(eval_group):
             eval_group = eval_group()
@@ -193,7 +246,7 @@ def main():
         .training(
             lr=1e-4,
             train_batch_size=4096, 
-            model={"fcnet_hiddens": [256, 256], "fcnet_activation": "relu"}
+            model={"fcnet_hiddens": [512, 512, 256], "fcnet_activation": "relu"}
         )
         .callbacks(CustomMetricsCallback)
         .api_stack(enable_rl_module_and_learner=False, enable_env_runner_and_connector_v2=False)
@@ -214,14 +267,17 @@ def main():
         )
     )
 
+    ### НОВОЕ: Расширенные мутации для PBT (включая Горизонт Планирования - gamma)
     pbt = PopulationBasedTraining(
         time_attr="training_iteration",
         perturbation_interval=30, 
         resample_probability=0.25,
         hyperparam_mutations={
-            "lr": tune.loguniform(1e-5, 5e-4),
-            "entropy_coeff": tune.uniform(0.0, 0.05),
-            "vf_loss_coeff": tune.uniform(0.1, 1.0)
+            "lr": tune.loguniform(1e-5, 1e-3),
+            "entropy_coeff": tune.uniform(0.0, 0.1),
+            "vf_loss_coeff": tune.uniform(0.1, 1.0),
+            "gamma": tune.uniform(0.90, 0.999),  # Эволюция горизонта
+            "lambda": tune.uniform(0.85, 1.0)    # Эволюция оценки GAE
         }
     )
 
@@ -231,14 +287,12 @@ def main():
         print_intermediate_tables=False
     )
     
-    # 🌟 ФИКС 4 (RAY BUG): Создаем конфиг без указания устаревших параметров
+    ### ИЗМЕНЕНО: num_to_keep=None для отключения сборщика мусора Ray
     ckpt_config = CheckpointConfig(
-        num_to_keep=3,
+        num_to_keep=None, 
         checkpoint_score_attribute="env_runners/episode_return_mean",
         checkpoint_score_order="max"
     )
-    
-    # 🌟 ВЗЛОМ ОБЪЕКТА: Принудительно вшиваем параметры в обход проверок версии Ray Train V2
     ckpt_config.checkpoint_frequency = 10
     ckpt_config.checkpoint_at_end = True
     
