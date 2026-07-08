@@ -1,1 +1,0 @@
-{"logical_batch": 4096, "phys_batch": 4096, "accum_steps": 1}
